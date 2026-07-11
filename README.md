@@ -15,14 +15,14 @@ streams play with ExoPlayer; embed providers and fallback playback use WebView.
 ## Screenshots
 
 <p align="center">
-  <a href="showcase/mobile-1080x2340/01-home.png"><img src="showcase/mobile-1080x2340/01-home.png" width="180" alt="Anilili home screen" /></a>
-  <a href="showcase/mobile-1080x2340/02-browse.png"><img src="showcase/mobile-1080x2340/02-browse.png" width="180" alt="Anime browse screen" /></a>
-  <a href="showcase/mobile-1080x2340/03-filters.png"><img src="showcase/mobile-1080x2340/03-filters.png" width="180" alt="Catalog filters" /></a>
+  <a href="showcase/mobile/01-home.webp"><img src="showcase/mobile/01-home.webp" width="180" alt="Anilili home screen" /></a>
+  <a href="showcase/mobile/02-browse.webp"><img src="showcase/mobile/02-browse.webp" width="180" alt="Anime browse screen" /></a>
+  <a href="showcase/mobile/03-filters.webp"><img src="showcase/mobile/03-filters.webp" width="180" alt="Catalog filters" /></a>
 </p>
 <p align="center">
-  <a href="showcase/mobile-1080x2340/04-search.png"><img src="showcase/mobile-1080x2340/04-search.png" width="180" alt="Anime search results" /></a>
-  <a href="showcase/mobile-1080x2340/05-anime-details.png"><img src="showcase/mobile-1080x2340/05-anime-details.png" width="180" alt="Anime details and server selection" /></a>
-  <a href="showcase/mobile-1080x2340/06-player.png"><img src="showcase/mobile-1080x2340/06-player.png" width="180" alt="Video player and episode grid" /></a>
+  <a href="showcase/mobile/04-search.webp"><img src="showcase/mobile/04-search.webp" width="180" alt="Anime search results" /></a>
+  <a href="showcase/mobile/05-anime-details.webp"><img src="showcase/mobile/05-anime-details.webp" width="180" alt="Anime details and server selection" /></a>
+  <a href="showcase/mobile/06-player.webp"><img src="showcase/mobile/06-player.webp" width="180" alt="Video player and episode grid" /></a>
 </p>
 
 ## Features
@@ -47,7 +47,7 @@ streams play with ExoPlayer; embed providers and fallback playback use WebView.
 | `app/src/main/java/com/miruronative/data/remote` | AniList, Miruro pipe, and provider clients |
 | `app/src/main/java/com/miruronative/ui` | Compose screens and player UI |
 | `docs/PIPE_PROTOCOL.md` | Notes about the Miruro pipe format |
-| `showcase/mobile-1080x2340` | Six curated 1080×2340 mobile screenshots |
+| `showcase/mobile` | Six optimized 540×1170 WebP screenshots |
 
 ## Build
 

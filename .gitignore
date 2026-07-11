@@ -33,11 +33,11 @@ anilili-showcase.zip
 
 # Keep only the curated mobile screenshots in showcase.
 showcase/*
-!showcase/mobile-1080x2340/
-showcase/mobile-1080x2340/*
-!showcase/mobile-1080x2340/01-home.png
-!showcase/mobile-1080x2340/02-browse.png
-!showcase/mobile-1080x2340/03-filters.png
-!showcase/mobile-1080x2340/04-search.png
-!showcase/mobile-1080x2340/05-anime-details.png
-!showcase/mobile-1080x2340/06-player.png
+!showcase/mobile/
+showcase/mobile/*
+!showcase/mobile/01-home.webp
+!showcase/mobile/02-browse.webp
+!showcase/mobile/03-filters.webp
+!showcase/mobile/04-search.webp
+!showcase/mobile/05-anime-details.webp
+!showcase/mobile/06-player.webp
