@@ -8,6 +8,7 @@ plugins {
 android {
     namespace = "com.miruronative"
     compileSdk = 35
+    buildToolsVersion = "35.0.1"
 
     defaultConfig {
         applicationId = "com.miruronative"
