@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="0"
+                android:startColor="#07070B"
+                android:endColor="#17101F" />
+            <corners android:radius="8dp" />
+        </shape>
+    </item>
+    <item
+        android:width="144dp"
+        android:height="144dp"
+        android:gravity="start|center_vertical"
+        android:left="8dp">
+        <bitmap
+            android:gravity="fill"
+            android:src="@drawable/anilili_launcher" />
+    </item>
+    <item
+        android:width="150dp"
+        android:height="60dp"
+        android:gravity="end|center_vertical"
+        android:right="14dp">
+        <vector
+            android:width="150dp"
+            android:height="60dp"
+            android:viewportWidth="150"
+            android:viewportHeight="60">
+            <path
+                android:fillColor="@android:color/transparent"
+                android:pathData="M8,31 C8,20 25,20 25,31 C25,42 8,42 8,31 M25,21 L25,42 M35,42 L35,21 M35,29 C40,19 53,20 53,31 L53,42 M65,21 L65,42 M65,13 L65,14 M77,10 L77,42 M89,21 L89,42 M89,13 L89,14 M101,10 L101,42 M113,21 L113,42 M113,13 L113,14 M125,10 L125,42 M137,21 L137,42 M137,13 L137,14"
+                android:strokeColor="#FFF7FB"
+                android:strokeLineCap="round"
+                android:strokeLineJoin="round"
+                android:strokeWidth="5" />
+        </vector>
+    </item>
+</layer-list>

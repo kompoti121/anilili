@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base window theme used before Compose takes over. Edge-to-edge, dark by default. -->
+    <style name="Theme.MiruroNative" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/miruro_bg</item>
+        <item name="android:navigationBarColor">@color/miruro_bg</item>
+        <item name="android:windowBackground">@color/miruro_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
