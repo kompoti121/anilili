@@ -285,9 +285,7 @@ fun ProfileScreen(
                 ProfileHero(
                     loggedIn = token != null,
                     state = profileState,
-                    onLogin = {
-                        if (device.isTv || !AuthManager.openLogin(context)) showLogin = true
-                    },
+                    onLogin = { showLogin = true },
                     onSync = { vm.loadIfLoggedIn() },
                     onLogout = vm::logout,
                 )

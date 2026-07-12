@@ -27,7 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 
 /**
  * Fullscreen AniList login. Loads the implicit-grant authorize URL; when AniList redirects to
- * `http://localhost/#access_token=…` we grab the token from the URL and never actually load localhost.
+ * `http://localhost/#access_token=…`, we grab the token before loading that URL.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -39,6 +39,7 @@ fun LoginWebView(onToken: (String) -> Unit, onCancel: () -> Unit) {
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
                     try {
+                        var tokenHandled = false
                         WebView(ctx).apply {
                             isFocusable = true
                             isFocusableInTouchMode = true
@@ -47,23 +48,29 @@ fun LoginWebView(onToken: (String) -> Unit, onCancel: () -> Unit) {
                             settings.allowFileAccess = false
                             settings.allowContentAccess = false
                             webViewClient = object : WebViewClient() {
+                                private fun handleRedirect(view: WebView?, url: String?): Boolean {
+                                    if (tokenHandled || url == null || !AuthManager.isRedirect(url)) return false
+                                    val token = AuthManager.extractToken(url) ?: return false
+                                    tokenHandled = true
+                                    view?.stopLoading()
+                                    onToken(token)
+                                    return true
+                                }
+
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                    if (url != null && AuthManager.isRedirect(url)) {
-                                        view?.stopLoading()
-                                        AuthManager.extractToken(url)?.let(onToken)
-                                    }
+                                    handleRedirect(view, url)
+                                }
+
+                                @Suppress("DEPRECATION")
+                                override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                                    return handleRedirect(view, url)
                                 }
 
                                 override fun shouldOverrideUrlLoading(
                                     view: WebView?,
                                     request: WebResourceRequest?,
                                 ): Boolean {
-                                    val url = request?.url?.toString() ?: return false
-                                    if (AuthManager.isRedirect(url)) {
-                                        AuthManager.extractToken(url)?.let(onToken)
-                                        return true
-                                    }
-                                    return false
+                                    return handleRedirect(view, request?.url?.toString())
                                 }
                             }
                             loadUrl(AuthManager.AUTHORIZE_URL)

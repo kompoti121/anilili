@@ -1,18 +1,16 @@
 package com.miruronative.data.auth
 
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
-import androidx.browser.customtabs.CustomTabsIntent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.miruronative.data.reminder.ReleaseSyncScheduler
 
 /**
- * AniList OAuth (Implicit Grant). We open the authorize URL in the browser or fallback WebView and
- * capture the access token from the `http://localhost/#access_token=…` redirect fragment — no
- * client secret in the app. Tokens are long-lived (~1 year; AniList has no refresh).
+ * AniList OAuth (Implicit Grant). AniList redirects to `http://localhost/#access_token=…`; the
+ * login WebView intercepts that URL before Android networking tries to open localhost. No client
+ * secret is stored in the app. Tokens are long-lived (~1 year; AniList has no refresh).
  */
 object AuthManager {
     const val CLIENT_ID = "45552"
@@ -45,22 +43,6 @@ object AuthManager {
         prefs.edit().remove("anilist_token").apply()
         _token.value = null
         ReleaseSyncScheduler.runNow(appContext)
-    }
-
-    fun openLogin(context: Context): Boolean {
-        val uri = Uri.parse(AUTHORIZE_URL)
-        return runCatching {
-            CustomTabsIntent.Builder()
-                .setShowTitle(true)
-                .build()
-                .launchUrl(context, uri)
-            true
-        }.getOrElse {
-            runCatching {
-                context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                true
-            }.getOrDefault(false)
-        }
     }
 
     /** True once a redirect URL carries the token; extract it with [extractToken]. */
