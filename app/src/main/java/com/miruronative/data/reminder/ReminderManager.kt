@@ -1,5 +1,6 @@
 package com.miruronative.data.reminder
 
+import android.Manifest
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,7 +9,10 @@ import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.miruronative.MainActivity
 import com.miruronative.R
 import com.miruronative.data.model.AiringSchedule
@@ -138,6 +142,9 @@ object ReminderManager {
 class AiringReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         ReminderManager.markDelivered(intent.getStringExtra("reminderId"))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
         val title = intent.getStringExtra("title") ?: "A saved anime"
         val episode = intent.getIntExtra("episode", 0)
         val mediaId = intent.getIntExtra("mediaId", 0)
@@ -171,5 +178,7 @@ class ReminderRescheduleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         ReminderManager.init(context)
+        AutomaticReleaseManager.init(context)
+        ReleaseSyncScheduler.runNow(context)
     }
 }

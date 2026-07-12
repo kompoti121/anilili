@@ -54,6 +54,9 @@
             android:name=".data.reminder.AiringReminderReceiver"
             android:exported="false" />
         <receiver
+            android:name=".data.reminder.AutomaticReleaseReceiver"
+            android:exported="false" />
+        <receiver
             android:name=".data.reminder.ReminderRescheduleReceiver"
             android:exported="true">
             <intent-filter>

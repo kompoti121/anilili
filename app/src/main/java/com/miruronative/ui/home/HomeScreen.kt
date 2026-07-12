@@ -63,6 +63,7 @@ import com.miruronative.ui.components.LoadingBox
 import com.miruronative.ui.components.AnimeCard
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
+import com.miruronative.ui.components.PullRefreshContainer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,6 +76,7 @@ fun HomeScreen(
     vm: HomeViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsState()
+    val isRefreshing by vm.isRefreshing.collectAsState()
     val history by LibraryStore.history.collectAsState()
     val device = LocalAppDeviceProfile.current
     Scaffold(
@@ -106,16 +108,21 @@ fun HomeScreen(
         when (val s = state) {
             is UiState.Loading -> LoadingBox(Modifier.padding(padding))
             is UiState.Error -> ErrorBox(s.message, vm::load, Modifier.padding(padding))
-            is UiState.Success -> HomeContent(
-                data = s.data,
-                selectedTab = vm.selectedTab,
-                onSelectTab = vm::selectTab,
-                history = history,
-                onAnimeClick = onAnimeClick,
-                onWatchNow = onWatchNow,
-                onResume = onResume,
-                modifier = Modifier.padding(padding),
-            )
+            is UiState.Success -> PullRefreshContainer(
+                isRefreshing = isRefreshing,
+                onRefresh = vm::refresh,
+                modifier = Modifier.padding(padding).fillMaxSize(),
+            ) {
+                HomeContent(
+                    data = s.data,
+                    selectedTab = vm.selectedTab,
+                    onSelectTab = vm::selectTab,
+                    history = history,
+                    onAnimeClick = onAnimeClick,
+                    onWatchNow = onWatchNow,
+                    onResume = onResume,
+                )
+            }
         }
     }
 }

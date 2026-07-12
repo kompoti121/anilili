@@ -10,6 +10,8 @@ import com.miruronative.data.auth.AuthManager
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.data.reminder.ReminderManager
+import com.miruronative.data.reminder.AutomaticReleaseManager
+import com.miruronative.data.reminder.ReleaseSyncScheduler
 
 class MiruroApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
@@ -19,6 +21,8 @@ class MiruroApp : Application(), ImageLoaderFactory {
         AuthManager.init(this)
         SettingsStore.init(this)
         ReminderManager.init(this)
+        AutomaticReleaseManager.init(this)
+        ReleaseSyncScheduler.schedule(this)
     }
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)

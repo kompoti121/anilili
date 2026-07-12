@@ -38,6 +38,8 @@ class HomeViewModel : ViewModel() {
 
     private val _state = MutableStateFlow<UiState<HomeData>>(UiState.Loading)
     val state = _state.asStateFlow()
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing = _isRefreshing.asStateFlow()
 
     var selectedTab by mutableStateOf(HomeTab.POPULAR)
         private set
@@ -46,21 +48,25 @@ class HomeViewModel : ViewModel() {
 
     fun selectTab(tab: HomeTab) { selectedTab = tab }
 
-    fun load() {
+    fun load(force: Boolean = false) {
         viewModelScope.launch {
-            _state.value = UiState.Loading
+            if (force && _state.value is UiState.Success) _isRefreshing.value = true else _state.value = UiState.Loading
             try {
                 val data = coroutineScope {
-                    val spotlight = async { repo.trending().items }
-                    val newest = async { repo.recentlyReleased().items }
-                    val popular = async { repo.popular().items }
-                    val topRated = async { repo.topRated().items }
+                    val spotlight = async { repo.trending(force = force).items }
+                    val newest = async { repo.recentlyReleased(force = force).items }
+                    val popular = async { repo.popular(force = force).items }
+                    val topRated = async { repo.topRated(force = force).items }
                     HomeData(spotlight.await(), newest.await(), popular.await(), topRated.await())
                 }
                 _state.value = UiState.Success(data)
             } catch (e: Exception) {
                 _state.value = UiState.Error(e.message ?: "Failed to load home")
+            } finally {
+                _isRefreshing.value = false
             }
         }
     }
+
+    fun refresh() = load(force = true)
 }

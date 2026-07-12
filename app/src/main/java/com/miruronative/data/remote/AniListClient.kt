@@ -6,6 +6,7 @@ import com.miruronative.data.model.GqlDiscoverOptionsResponse
 import com.miruronative.data.model.GqlMediaResponse
 import com.miruronative.data.model.GqlPageResponse
 import com.miruronative.data.model.GqlViewerResponse
+import com.miruronative.data.model.GqlViewerFavouritesResponse
 import com.miruronative.data.model.GraphQLRequest
 import com.miruronative.data.model.Media
 import com.miruronative.data.model.DiscoverFilters
@@ -17,6 +18,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.add
@@ -245,6 +250,34 @@ class AniListClient(
         json.decodeFromString(GqlViewerResponse.serializer(), text).data?.viewer
     }
 
+    /** Authenticated: every anime the current user has marked as a favourite. */
+    suspend fun favouriteAnime(): List<Media> = withContext(Dispatchers.IO) {
+        val all = mutableListOf<Media>()
+        var page = 1
+        var hasNext = true
+        while (hasNext && page <= 10) {
+            val gql = """
+                query (${'$'}page: Int) {
+                  Viewer {
+                    favourites {
+                      anime(page: ${'$'}page, perPage: 50) {
+                        pageInfo { hasNextPage currentPage }
+                        nodes { $mediaListFields }
+                      }
+                    }
+                  }
+                }
+            """.trimIndent()
+            val text = post(gql, buildJsonObject { put("page", page) })
+            val connection = json.decodeFromString(GqlViewerFavouritesResponse.serializer(), text)
+                .data?.viewer?.favourites?.anime ?: break
+            all += connection.nodes
+            hasNext = connection.pageInfo.hasNextPage
+            page++
+        }
+        all.distinctBy { it.id }
+    }
+
     /** Authenticated: the user's anime lists (Watching + Planning) with per-entry progress. */
     suspend fun userAnimeList(userId: Int): MediaListCollection? = withContext(Dispatchers.IO) {
         val gql = """
@@ -278,6 +311,47 @@ class AniListClient(
             put("progress", progress)
         }
         post(gql, vars)
+    }
+
+    /**
+     * Mirrors the device Save button without damaging an existing AniList status/progress.
+     * New saves become PLANNING; unsaving only removes entries that are still PLANNING.
+     */
+    suspend fun syncSavedAnime(mediaId: Int, saved: Boolean) = withContext(Dispatchers.IO) {
+        val current = mediaListEntry(mediaId)
+        when {
+            saved && current == null -> {
+                val mutation = """
+                    mutation (${'$'}mediaId: Int) {
+                      SaveMediaListEntry(mediaId: ${'$'}mediaId, status: PLANNING) { id status }
+                    }
+                """.trimIndent()
+                post(mutation, buildJsonObject { put("mediaId", mediaId) })
+            }
+            !saved && current?.second == "PLANNING" -> {
+                val mutation = """
+                    mutation (${'$'}id: Int) {
+                      DeleteMediaListEntry(id: ${'$'}id) { deleted }
+                    }
+                """.trimIndent()
+                post(mutation, buildJsonObject { put("id", current.first) })
+            }
+        }
+    }
+
+    private fun mediaListEntry(mediaId: Int): Pair<Int, String>? {
+        val query = """
+            query (${'$'}mediaId: Int) {
+              Media(id: ${'$'}mediaId, type: ANIME) { mediaListEntry { id status } }
+            }
+        """.trimIndent()
+        val text = post(query, buildJsonObject { put("mediaId", mediaId) })
+        val entry = json.parseToJsonElement(text).jsonObject["data"]?.jsonObject
+            ?.get("Media")?.jsonObject
+            ?.get("mediaListEntry") as? JsonObject ?: return null
+        val id = entry["id"]?.jsonPrimitive?.intOrNull ?: return null
+        val status = entry["status"]?.jsonPrimitive?.contentOrNull ?: return null
+        return id to status
     }
 
     private fun post(query: String, variables: JsonObject): String {

@@ -188,6 +188,26 @@ data class ViewerData(@SerialName("Viewer") val viewer: Viewer? = null)
 data class GqlViewerResponse(val data: ViewerData? = null)
 
 @Serializable
+data class FavouriteAnimeConnection(
+    val pageInfo: PageInfo = PageInfo(),
+    val nodes: List<Media> = emptyList(),
+)
+
+@Serializable
+data class ViewerFavourites(
+    val anime: FavouriteAnimeConnection = FavouriteAnimeConnection(),
+)
+
+@Serializable
+data class ViewerWithFavourites(val favourites: ViewerFavourites = ViewerFavourites())
+
+@Serializable
+data class ViewerFavouritesData(@SerialName("Viewer") val viewer: ViewerWithFavourites? = null)
+
+@Serializable
+data class GqlViewerFavouritesResponse(val data: ViewerFavouritesData? = null)
+
+@Serializable
 data class MediaListEntry(
     val id: Int = 0,
     val progress: Int = 0,

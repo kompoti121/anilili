@@ -1,7 +1,10 @@
 package com.miruronative
 
+import android.Manifest
 import android.app.PictureInPictureParams
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Rect
@@ -11,8 +14,10 @@ import android.util.Rational
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -37,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.NavType
@@ -53,6 +60,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.core.content.ContextCompat
+import com.miruronative.data.reminder.AutomaticReleaseManager
+import com.miruronative.data.reminder.ReleaseSyncScheduler
+import com.miruronative.data.settings.SettingsStore
 import com.miruronative.ui.detail.DetailScreen
 import com.miruronative.ui.home.HomeScreen
 import com.miruronative.ui.PipeWebView
@@ -171,6 +182,7 @@ private fun MiruroRoot(
     }
 
     CompositionLocalProvider(LocalAppDeviceProfile provides deviceProfile) {
+        NotificationPermissionEffect()
         Box(Modifier.fillMaxSize()) {
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
@@ -215,6 +227,37 @@ private fun MiruroRoot(
             }
             // Hidden Cloudflare-cleared WebView that carries all pipe requests.
             PipeWebView()
+        }
+    }
+}
+
+@Composable
+private fun NotificationPermissionEffect() {
+    val context = LocalContext.current
+    val device = LocalAppDeviceProfile.current
+    val enabled by SettingsStore.releaseNotifications.collectAsState()
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        SettingsStore.setReleaseNotifications(granted)
+        if (granted) ReleaseSyncScheduler.runNow(context) else AutomaticReleaseManager.cancelAll()
+    }
+
+    LaunchedEffect(enabled, device.isTv) {
+        if (!enabled) {
+            AutomaticReleaseManager.cancelAll()
+            return@LaunchedEffect
+        }
+        if (device.isTv || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@LaunchedEffect
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            ReleaseSyncScheduler.runNow(context)
+            return@LaunchedEffect
+        }
+        val prefs = context.getSharedPreferences("anilili_permissions", Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("release_notifications_prompted", false)) {
+            prefs.edit().putBoolean("release_notifications_prompted", true).apply()
+            launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            SettingsStore.setReleaseNotifications(false)
+            AutomaticReleaseManager.cancelAll()
         }
     }
 }

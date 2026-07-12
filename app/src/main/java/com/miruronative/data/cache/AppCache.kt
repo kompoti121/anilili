@@ -93,40 +93,42 @@ class AppCache(
         serializer: KSerializer<T>,
         ttlMs: Long,
         staleForMs: Long = DEFAULT_STALE_MS,
+        forceRefresh: Boolean = false,
         fetch: suspend () -> T,
     ): T {
         val now = System.currentTimeMillis()
         val cached = read(key)
         val decoded = cached?.let { decode(it, serializer) }
-        if (cached != null && decoded != null && now <= cached.expiresAt) {
+        if (!forceRefresh && cached != null && decoded != null && now <= cached.expiresAt) {
             touch(cached, now)
             return decoded
         }
-        if (cached != null && decoded != null && now <= cached.expiresAt + staleForMs) {
+        if (!forceRefresh && cached != null && decoded != null && now <= cached.expiresAt + staleForMs) {
             touch(cached, now)
             scope.launch {
                 try {
-                    refresh(key, serializer, ttlMs, fetch)
+                    refresh(key, serializer, ttlMs, false, fetch)
                 } catch (_: Exception) {
                     // The stale value remains available until its safety window closes.
                 }
             }
             return decoded
         }
-        return refresh(key, serializer, ttlMs, fetch)
+        return refresh(key, serializer, ttlMs, forceRefresh, fetch)
     }
 
     private suspend fun <T> refresh(
         key: String,
         serializer: KSerializer<T>,
         ttlMs: Long,
+        forceRefresh: Boolean,
         fetch: suspend () -> T,
     ): T {
         val lock = keyLocks[(key.hashCode() and Int.MAX_VALUE) % keyLocks.size]
         return lock.withLock {
                 val now = System.currentTimeMillis()
                 val newer = read(key)
-                if (newer != null && now <= newer.expiresAt) {
+                if (!forceRefresh && newer != null && now <= newer.expiresAt) {
                     decode(newer, serializer)?.let { return@withLock it }
                 }
 

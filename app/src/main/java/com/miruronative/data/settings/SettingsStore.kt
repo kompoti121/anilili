@@ -32,6 +32,12 @@ object SettingsStore {
     private val _preferDub = MutableStateFlow(false)
     val preferDub = _preferDub.asStateFlow()
 
+    private val _releaseNotifications = MutableStateFlow(true)
+    val releaseNotifications = _releaseNotifications.asStateFlow()
+
+    private val _syncSavedToAniList = MutableStateFlow(true)
+    val syncSavedToAniList = _syncSavedToAniList.asStateFlow()
+
     fun init(context: Context) {
         val app = context.applicationContext
         store = PreferenceDataStoreFactory.create(
@@ -51,6 +57,8 @@ object SettingsStore {
     fun setAutoplay(value: Boolean) = save(AUTOPLAY, value, _autoplay)
     fun setAutoSyncAniList(value: Boolean) = save(AUTO_SYNC, value, _autoSyncAniList)
     fun setPreferDub(value: Boolean) = save(PREFER_DUB, value, _preferDub)
+    fun setReleaseNotifications(value: Boolean) = save(RELEASE_NOTIFICATIONS, value, _releaseNotifications)
+    fun setSyncSavedToAniList(value: Boolean) = save(SYNC_SAVED_TO_ANILIST, value, _syncSavedToAniList)
 
     private fun save(key: Preferences.Key<Boolean>, value: Boolean, state: MutableStateFlow<Boolean>) {
         state.value = value
@@ -61,6 +69,8 @@ object SettingsStore {
         _autoplay.value = prefs[AUTOPLAY] ?: true
         _autoSyncAniList.value = prefs[AUTO_SYNC] ?: true
         _preferDub.value = prefs[PREFER_DUB] ?: false
+        _releaseNotifications.value = prefs[RELEASE_NOTIFICATIONS] ?: true
+        _syncSavedToAniList.value = prefs[SYNC_SAVED_TO_ANILIST] ?: true
     }
 
     private suspend fun migrateLegacyPreferences(context: Context) {
@@ -71,6 +81,8 @@ object SettingsStore {
             prefs[AUTOPLAY] = legacy.getBoolean("autoplay", true)
             prefs[AUTO_SYNC] = legacy.getBoolean("auto_sync_anilist", true)
             prefs[PREFER_DUB] = legacy.getBoolean("prefer_dub", false)
+            prefs[RELEASE_NOTIFICATIONS] = true
+            prefs[SYNC_SAVED_TO_ANILIST] = true
             prefs[MIGRATED] = true
         }
         legacy.edit().clear().apply()
@@ -79,5 +91,7 @@ object SettingsStore {
     private val AUTOPLAY = booleanPreferencesKey("autoplay")
     private val AUTO_SYNC = booleanPreferencesKey("auto_sync_anilist")
     private val PREFER_DUB = booleanPreferencesKey("prefer_dub")
+    private val RELEASE_NOTIFICATIONS = booleanPreferencesKey("release_notifications")
+    private val SYNC_SAVED_TO_ANILIST = booleanPreferencesKey("sync_saved_to_anilist")
     private val MIGRATED = booleanPreferencesKey("migrated_from_shared_preferences")
 }

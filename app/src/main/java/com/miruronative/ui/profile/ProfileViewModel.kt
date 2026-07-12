@@ -6,6 +6,7 @@ import com.miruronative.data.AppGraph
 import com.miruronative.data.auth.AuthManager
 import com.miruronative.data.model.MediaListEntry
 import com.miruronative.data.model.Viewer
+import com.miruronative.data.library.LibraryStore
 import com.miruronative.ui.UiState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,14 +27,16 @@ class ProfileViewModel : ViewModel() {
 
     private val _profile = MutableStateFlow<UiState<AniListProfile>?>(null)
     val profile = _profile.asStateFlow()
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing = _isRefreshing.asStateFlow()
 
-    fun loadIfLoggedIn() {
+    fun loadIfLoggedIn(refresh: Boolean = false) {
         if (!AuthManager.isLoggedIn) {
             _profile.value = null
             return
         }
         viewModelScope.launch {
-            _profile.value = UiState.Loading
+            if (refresh && _profile.value is UiState.Success) _isRefreshing.value = true else _profile.value = UiState.Loading
             try {
                 val viewer = repo.viewer() ?: error("Couldn't load your AniList profile")
                 val lists = repo.userAnimeList(viewer.id)?.lists ?: emptyList()
@@ -48,12 +51,17 @@ class ProfileViewModel : ViewModel() {
                 )
             } catch (e: Exception) {
                 _profile.value = UiState.Error(e.message ?: "Failed to load AniList")
+            } finally {
+                _isRefreshing.value = false
             }
         }
     }
 
+    fun refresh() = loadIfLoggedIn(refresh = true)
+
     fun onLoggedIn(token: String) {
         AuthManager.setToken(token)
+        LibraryStore.syncSavedToAniList()
         loadIfLoggedIn()
     }
 

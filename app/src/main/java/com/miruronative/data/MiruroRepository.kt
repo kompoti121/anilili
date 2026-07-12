@@ -28,26 +28,26 @@ class MiruroRepository(
     private val cache: AppCache,
 ) {
     // ---- discovery (AniList) ----
-    suspend fun trending(page: Int = 1): MediaPage = mediaPage("trending:$page", COLLECTION_TTL) {
+    suspend fun trending(page: Int = 1, force: Boolean = false): MediaPage = mediaPage("trending:$page", COLLECTION_TTL, force) {
         aniList.collection("TRENDING_DESC", page = page, perPage = 30)
     }
-    suspend fun popular(page: Int = 1): MediaPage = mediaPage("popular:$page", COLLECTION_TTL) {
+    suspend fun popular(page: Int = 1, force: Boolean = false): MediaPage = mediaPage("popular:$page", COLLECTION_TTL, force) {
         aniList.collection("POPULARITY_DESC", page = page, perPage = 30)
     }
-    suspend fun topRated(page: Int = 1): MediaPage = mediaPage("top:$page", COLLECTION_TTL) {
+    suspend fun topRated(page: Int = 1, force: Boolean = false): MediaPage = mediaPage("top:$page", COLLECTION_TTL, force) {
         aniList.collection("SCORE_DESC", page = page, perPage = 30)
     }
-    suspend fun recentlyReleased(page: Int = 1): MediaPage =
-        mediaPage("recent:$page", AIRING_TTL) {
+    suspend fun recentlyReleased(page: Int = 1, force: Boolean = false): MediaPage =
+        mediaPage("recent:$page", AIRING_TTL, force) {
             aniList.collection("START_DATE_DESC", status = "RELEASING", page = page, perPage = 30)
         }
 
-    suspend fun airing(page: Int = 1): MediaPage =
-        mediaPage("airing:$page", AIRING_TTL) {
+    suspend fun airing(page: Int = 1, force: Boolean = false): MediaPage =
+        mediaPage("airing:$page", AIRING_TTL, force) {
             aniList.collection("POPULARITY_DESC", status = "RELEASING", page = page, perPage = 40)
         }
 
-    suspend fun schedule(dayOffset: Int): List<AiringSchedule> {
+    suspend fun schedule(dayOffset: Int, force: Boolean = false): List<AiringSchedule> {
         val zone = java.time.ZoneId.systemDefault()
         val day = java.time.LocalDate.now(zone).plusDays(dayOffset.toLong())
         val start = day.atStartOfDay(zone).toEpochSecond()
@@ -56,14 +56,15 @@ class MiruroRepository(
             key = "schedule:$day",
             serializer = ListSerializer(AiringSchedule.serializer()),
             ttlMs = SCHEDULE_TTL,
+            forceRefresh = force,
         ) { aniList.airingSchedule(start, end) }
     }
 
-    suspend fun search(query: String, page: Int = 1): MediaPage =
-        mediaPage("search:${query.trim().lowercase()}:$page", SEARCH_TTL) { aniList.search(query, page) }
+    suspend fun search(query: String, page: Int = 1, force: Boolean = false): MediaPage =
+        mediaPage("search:${query.trim().lowercase()}:$page", SEARCH_TTL, force) { aniList.search(query, page) }
 
-    suspend fun discover(filters: DiscoverFilters, page: Int = 1): MediaPage =
-        mediaPage("discover:${filters.cacheKey()}:$page", COLLECTION_TTL) { aniList.discover(filters, page) }
+    suspend fun discover(filters: DiscoverFilters, page: Int = 1, force: Boolean = false): MediaPage =
+        mediaPage("discover:${filters.cacheKey()}:$page", COLLECTION_TTL, force) { aniList.discover(filters, page) }
 
     suspend fun discoverOptions(): DiscoverOptions = cache.getOrFetch(
         key = "discover-options",
@@ -73,29 +74,34 @@ class MiruroRepository(
 
     // ---- authenticated (AniList login) ----
     suspend fun viewer() = aniList.viewer()
+    suspend fun favouriteAnime() = aniList.favouriteAnime()
     suspend fun userAnimeList(userId: Int) = aniList.userAnimeList(userId)
     suspend fun saveAniListProgress(mediaId: Int, progress: Int, completed: Boolean = false) =
         aniList.saveMediaListEntry(mediaId, if (completed) "COMPLETED" else "CURRENT", progress)
+    suspend fun syncSavedAnime(mediaId: Int, saved: Boolean) = aniList.syncSavedAnime(mediaId, saved)
 
-    suspend fun animeInfo(id: Int): Media? = cache.getOrFetch(
+    suspend fun animeInfo(id: Int, force: Boolean = false): Media? = cache.getOrFetch(
         key = "anime:$id",
         serializer = Media.serializer().nullable,
         ttlMs = INFO_TTL,
+        forceRefresh = force,
     ) { aniList.animeInfo(id) }
 
     // ---- streaming (two backends, cached per source) ----
     /** Fast source — the Miruro pipe. */
-    suspend fun miruroEpisodes(anilistId: Int): EpisodesResult = cache.getOrFetch(
+    suspend fun miruroEpisodes(anilistId: Int, force: Boolean = false): EpisodesResult = cache.getOrFetch(
         key = "episodes:miruro:$anilistId",
         serializer = EpisodesResult.serializer(),
         ttlMs = EPISODES_TTL,
+        forceRefresh = force,
     ) { pipe.getEpisodes(anilistId) }
 
     /** Extra sources — Anivexa-API (can be slower; loaded in the background by the detail screen). */
-    suspend fun anivexaEpisodes(anilistId: Int): EpisodesResult = cache.getOrFetch(
+    suspend fun anivexaEpisodes(anilistId: Int, force: Boolean = false): EpisodesResult = cache.getOrFetch(
         key = "episodes:anivexa:$anilistId",
         serializer = EpisodesResult.serializer(),
         ttlMs = EPISODES_TTL,
+        forceRefresh = force,
     ) { anivexa.getEpisodes(anilistId) }
 
     /** Merged view of both sources — used where the full provider list is needed (watch screen). */
@@ -159,11 +165,13 @@ class MiruroRepository(
     private suspend fun mediaPage(
         key: String,
         ttlMs: Long,
+        force: Boolean = false,
         fetch: suspend () -> MediaPage,
     ): MediaPage = cache.getOrFetch(
         key = "media:$key",
         serializer = MediaPage.serializer(),
         ttlMs = ttlMs,
+        forceRefresh = force,
         fetch = fetch,
     )
 

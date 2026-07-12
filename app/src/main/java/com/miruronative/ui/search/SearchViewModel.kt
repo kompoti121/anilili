@@ -28,6 +28,8 @@ class SearchViewModel : ViewModel() {
 
     private val _state = MutableStateFlow<UiState<List<Media>>>(UiState.Loading)
     val state = _state.asStateFlow()
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing = _isRefreshing.asStateFlow()
 
     private val _options = MutableStateFlow(DiscoverOptions(genres = DEFAULT_GENRES))
     val options = _options.asStateFlow()
@@ -65,20 +67,22 @@ class SearchViewModel : ViewModel() {
     fun clearFilters() = update(DiscoverFilters(query = filters.query))
     fun clearAll() = update(DiscoverFilters())
     fun retry() = submit(delayMs = 0)
+    fun refresh() = submit(delayMs = 0, force = true)
 
     private fun update(updated: DiscoverFilters, delayMs: Long = 120) {
         filters = updated
         submit(delayMs)
     }
 
-    private fun submit(delayMs: Long) {
+    private fun submit(delayMs: Long, force: Boolean = false) {
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             if (delayMs > 0) delay(delayMs)
-            _state.value = UiState.Loading
-            runCatching { repo.discover(filters).items }
+            if (force && _state.value is UiState.Success) _isRefreshing.value = true else _state.value = UiState.Loading
+            runCatching { repo.discover(filters, force = force).items }
                 .onSuccess { _state.value = UiState.Success(it) }
                 .onFailure { _state.value = UiState.Error(it.message ?: "Could not load the catalog") }
+            _isRefreshing.value = false
         }
     }
 

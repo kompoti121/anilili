@@ -70,6 +70,7 @@ import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.components.AnimeCard
 import com.miruronative.ui.components.ErrorBox
 import com.miruronative.ui.components.LoadingBox
+import com.miruronative.ui.components.PullRefreshContainer
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -79,6 +80,7 @@ fun SearchScreen(
     vm: SearchViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsState()
+    val isRefreshing by vm.isRefreshing.collectAsState()
     val options by vm.options.collectAsState()
     val device = LocalAppDeviceProfile.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -176,7 +178,13 @@ fun SearchScreen(
             when (val current = state) {
                 is UiState.Loading -> LoadingBox()
                 is UiState.Error -> ErrorBox(current.message, vm::retry)
-                is UiState.Success -> ResultsGrid(current.data, vm.filters, onAnimeClick)
+                is UiState.Success -> PullRefreshContainer(
+                    isRefreshing = isRefreshing,
+                    onRefresh = vm::refresh,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    ResultsGrid(current.data, vm.filters, onAnimeClick)
+                }
             }
         }
     }

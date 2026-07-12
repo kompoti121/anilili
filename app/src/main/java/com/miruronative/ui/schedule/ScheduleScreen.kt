@@ -57,6 +57,7 @@ import com.miruronative.ui.UiState
 import com.miruronative.ui.components.ErrorBox
 import com.miruronative.ui.components.LoadingBox
 import com.miruronative.ui.components.RatingBadge
+import com.miruronative.ui.components.PullRefreshContainer
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
 import java.time.Instant
@@ -77,6 +78,7 @@ fun ScheduleScreen(
 ) {
     val device = LocalAppDeviceProfile.current
     val state by vm.state.collectAsState()
+    val isRefreshing by vm.isRefreshing.collectAsState()
     val scheduled by ReminderManager.scheduled.collectAsState()
     val context = LocalContext.current
     var pendingReminder by remember { mutableStateOf<AiringSchedule?>(null) }
@@ -117,7 +119,13 @@ fun ScheduleScreen(
             when (val s = state) {
                 is UiState.Loading -> LoadingBox()
                 is UiState.Error -> ErrorBox(s.message, vm::load)
-                is UiState.Success -> ScheduleList(s.data, scheduled, onAnimeClick, toggleReminder)
+                is UiState.Success -> PullRefreshContainer(
+                    isRefreshing = isRefreshing,
+                    onRefresh = vm::refresh,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    ScheduleList(s.data, scheduled, onAnimeClick, toggleReminder)
+                }
             }
         }
     }
@@ -127,8 +135,10 @@ fun ScheduleScreen(
 private fun DayTabs(selected: Int, onSelect: (Int) -> Unit) {
     val device = LocalAppDeviceProfile.current
     val today = LocalDate.now(ZoneId.systemDefault())
-    val tabs = (0..6).map { offset ->
+    val tabs = (-2..6).map { offset ->
         offset to when (offset) {
+            -2 -> "2 days ago"
+            -1 -> "Yesterday"
             0 -> "Today"
             1 -> "Tomorrow"
             else -> today.plusDays(offset.toLong()).format(DateTimeFormatter.ofPattern("EEE"))
@@ -259,15 +269,17 @@ private fun ScheduleRow(
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        IconButton(
-            onClick = { onToggleReminder(item) },
-            modifier = Modifier.focusHighlight(RoundedCornerShape(24.dp)),
-        ) {
-            Icon(
-                if (reminded) Icons.Filled.Notifications else Icons.Outlined.NotificationsNone,
-                contentDescription = if (reminded) "Remove reminder" else "Remind me",
-                tint = if (reminded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        if (item.airingAt * 1000L > System.currentTimeMillis()) {
+            IconButton(
+                onClick = { onToggleReminder(item) },
+                modifier = Modifier.focusHighlight(RoundedCornerShape(24.dp)),
+            ) {
+                Icon(
+                    if (reminded) Icons.Filled.Notifications else Icons.Outlined.NotificationsNone,
+                    contentDescription = if (reminded) "Remove reminder" else "Remind me",
+                    tint = if (reminded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

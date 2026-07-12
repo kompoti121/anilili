@@ -27,6 +27,8 @@ class DetailViewModel : ViewModel() {
 
     private val _state = MutableStateFlow<UiState<DetailData>>(UiState.Loading)
     val state = _state.asStateFlow()
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing = _isRefreshing.asStateFlow()
 
     var selectedProvider by mutableStateOf<String?>(null)
         private set
@@ -40,13 +42,13 @@ class DetailViewModel : ViewModel() {
         loadedId = id
         selectedProvider = null
         viewModelScope.launch {
-            _state.value = UiState.Loading
+            if (force && _state.value is UiState.Success) _isRefreshing.value = true else _state.value = UiState.Loading
             try {
                 // Start independent calls together. Miruro still renders first, while the
                 // slower Anivexa batch no longer waits behind metadata and pipe discovery.
-                val infoRequest = async { runCatching { repo.animeInfo(id) } }
-                val miruroRequest = async { runCatching { repo.miruroEpisodes(id) } }
-                val anivexaRequest = async { runCatching { repo.anivexaEpisodes(id) } }
+                val infoRequest = async { runCatching { repo.animeInfo(id, force = force) } }
+                val miruroRequest = async { runCatching { repo.miruroEpisodes(id, force = force) } }
+                val anivexaRequest = async { runCatching { repo.anivexaEpisodes(id, force = force) } }
 
                 val info = infoRequest.await().getOrThrow() ?: error("Anime not found")
 
@@ -67,9 +69,13 @@ class DetailViewModel : ViewModel() {
                 _state.value = UiState.Success(DetailData(info, merged, err, loadingMore = false))
             } catch (e: Exception) {
                 _state.value = UiState.Error(e.message ?: "Failed to load")
+            } finally {
+                _isRefreshing.value = false
             }
         }
     }
+
+    fun refresh(id: Int) = load(id, force = true)
 
     private fun applyDefaults(eps: EpisodesResult) {
         val current = selectedProvider

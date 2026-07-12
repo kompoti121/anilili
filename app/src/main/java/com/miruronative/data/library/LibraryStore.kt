@@ -2,8 +2,18 @@ package com.miruronative.data.library
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.miruronative.data.reminder.ReleaseSyncScheduler
+import com.miruronative.data.AppGraph
+import com.miruronative.data.auth.AuthManager
+import com.miruronative.data.settings.SettingsStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 
 /**
@@ -17,6 +27,9 @@ object LibraryStore {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private lateinit var prefs: SharedPreferences
+    private lateinit var appContext: Context
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val aniListSyncMutex = Mutex()
 
     private val _history = MutableStateFlow<List<HistoryEntry>>(emptyList())
     val history = _history.asStateFlow()
@@ -25,7 +38,8 @@ object LibraryStore {
     val watchlist = _watchlist.asStateFlow()
 
     fun init(context: Context) {
-        prefs = context.applicationContext.getSharedPreferences("miruro_library", Context.MODE_PRIVATE)
+        appContext = context.applicationContext
+        prefs = appContext.getSharedPreferences("miruro_library", Context.MODE_PRIVATE)
         _history.value = decodeList(prefs.getString(KEY_HISTORY, null), HistoryEntry.serializer())
         _watchlist.value = decodeList(prefs.getString(KEY_WATCHLIST, null), WatchlistEntry.serializer())
     }
@@ -67,6 +81,25 @@ object LibraryStore {
         }
         _watchlist.value = updated
         persist(KEY_WATCHLIST, updated, WatchlistEntry.serializer())
+        ReleaseSyncScheduler.runNow(appContext)
+        if (AuthManager.isLoggedIn && SettingsStore.syncSavedToAniList.value) {
+            val saved = updated.any { it.anilistId == entry.anilistId }
+            scope.launch {
+                aniListSyncMutex.withLock {
+                    runCatching { AppGraph.repository.syncSavedAnime(entry.anilistId, saved) }
+                }
+            }
+        }
+    }
+
+    fun syncSavedToAniList() {
+        if (!AuthManager.isLoggedIn || !SettingsStore.syncSavedToAniList.value) return
+        val savedIds = _watchlist.value.map { it.anilistId }
+        scope.launch {
+            aniListSyncMutex.withLock {
+                savedIds.forEach { id -> runCatching { AppGraph.repository.syncSavedAnime(id, true) } }
+            }
+        }
     }
 
     // ---- persistence ----

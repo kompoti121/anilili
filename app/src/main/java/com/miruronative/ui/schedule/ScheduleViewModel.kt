@@ -17,6 +17,8 @@ class ScheduleViewModel : ViewModel() {
 
     private val _state = MutableStateFlow<UiState<List<AiringSchedule>>>(UiState.Loading)
     val state = _state.asStateFlow()
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing = _isRefreshing.asStateFlow()
 
     var selectedDay by mutableIntStateOf(0) // -1 yesterday, 0 today, +1 tomorrow
         private set
@@ -29,14 +31,18 @@ class ScheduleViewModel : ViewModel() {
         load()
     }
 
-    fun load() {
+    fun load(force: Boolean = false) {
         viewModelScope.launch {
-            _state.value = UiState.Loading
+            if (force && _state.value is UiState.Success) _isRefreshing.value = true else _state.value = UiState.Loading
             try {
-                _state.value = UiState.Success(repo.schedule(selectedDay))
+                _state.value = UiState.Success(repo.schedule(selectedDay, force = force))
             } catch (e: Exception) {
                 _state.value = UiState.Error(e.message ?: "Failed to load schedule")
+            } finally {
+                _isRefreshing.value = false
             }
         }
     }
+
+    fun refresh() = load(force = true)
 }

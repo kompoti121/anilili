@@ -65,6 +65,7 @@ import com.miruronative.ui.components.ErrorBox
 import com.miruronative.ui.components.LoadingBox
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
+import com.miruronative.ui.components.PullRefreshContainer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,6 +77,7 @@ fun DetailScreen(
 ) {
     LaunchedEffect(animeId) { vm.load(animeId) }
     val state by vm.state.collectAsState()
+    val isRefreshing by vm.isRefreshing.collectAsState()
     val watchlist by LibraryStore.watchlist.collectAsState()
     val history by LibraryStore.history.collectAsState()
     val info = (state as? UiState.Success)?.data?.info
@@ -126,16 +128,21 @@ fun DetailScreen(
         when (val s = state) {
             is UiState.Loading -> LoadingBox(Modifier.padding(padding))
             is UiState.Error -> ErrorBox(s.message, { vm.load(animeId, force = true) }, Modifier.padding(padding))
-            is UiState.Success -> DetailContent(
-                data = s.data,
-                selectedProvider = vm.selectedProvider,
-                selectedCategory = vm.selectedCategory,
-                onSelectProvider = vm::selectProvider,
-                onSelectCategory = vm::selectCategory,
-                onPlay = onPlay,
-                resume = history.firstOrNull { it.anilistId == animeId },
-                modifier = Modifier.padding(padding),
-            )
+            is UiState.Success -> PullRefreshContainer(
+                isRefreshing = isRefreshing,
+                onRefresh = { vm.refresh(animeId) },
+                modifier = Modifier.padding(padding).fillMaxSize(),
+            ) {
+                DetailContent(
+                    data = s.data,
+                    selectedProvider = vm.selectedProvider,
+                    selectedCategory = vm.selectedCategory,
+                    onSelectProvider = vm::selectProvider,
+                    onSelectCategory = vm::selectCategory,
+                    onPlay = onPlay,
+                    resume = history.firstOrNull { it.anilistId == animeId },
+                )
+            }
         }
     }
 }

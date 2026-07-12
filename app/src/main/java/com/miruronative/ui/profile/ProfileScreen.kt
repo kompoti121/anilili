@@ -1,5 +1,10 @@
 package com.miruronative.ui.profile
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,7 +14,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,12 +24,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -55,6 +57,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Brush
@@ -70,36 +73,43 @@ import com.miruronative.data.library.HistoryEntry
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.library.WatchlistEntry
 import com.miruronative.data.model.MediaListEntry
+import com.miruronative.data.reminder.AutomaticReleaseManager
+import com.miruronative.data.reminder.ReleaseSyncScheduler
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.ui.UiState
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
+import com.miruronative.ui.components.PullRefreshContainer
 import com.miruronative.ui.components.RatingBadge
+import androidx.core.content.ContextCompat
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private enum class ProfileListKind(val label: String) {
+private enum class LibraryView(val label: String) {
+    WATCHLIST("My watchlist"),
     WATCHING("Watching"),
     REWATCHING("Re-watching"),
-    COMPLETED("Completed"),
-    PLANNING("Planning"),
     PAUSED("Paused"),
+    COMPLETED("Completed"),
     DROPPED("Dropped"),
-    ;
-
-    fun entries(profile: AniListProfile): List<MediaListEntry> = when (this) {
-        WATCHING -> profile.watching
-        REWATCHING -> profile.rewatching
-        COMPLETED -> profile.completed
-        PLANNING -> profile.planning
-        PAUSED -> profile.paused
-        DROPPED -> profile.dropped
-    }
 }
 
 private data class SelectOption(val value: String?, val label: String)
+
+private data class SavedAnimeCardData(
+    val id: Int,
+    val title: String,
+    val cover: String?,
+    val format: String?,
+    val airingStatus: String?,
+    val status: String?,
+    val userScore: Double?,
+    val averageScore: Int?,
+    val progress: Int?,
+    val totalEpisodes: Int?,
+)
 
 private val formatOptions = listOf(
     SelectOption(null, "Any format"),
@@ -127,6 +137,7 @@ fun ProfileScreen(
     modifier: Modifier = Modifier,
     vm: ProfileViewModel = viewModel(),
 ) {
+    val context = LocalContext.current
     val device = LocalAppDeviceProfile.current
     val token by AuthManager.token.collectAsState()
     val profileState by vm.profile.collectAsState()
@@ -135,13 +146,19 @@ fun ProfileScreen(
     val autoplay by SettingsStore.autoplay.collectAsState()
     val autoSync by SettingsStore.autoSyncAniList.collectAsState()
     val preferDub by SettingsStore.preferDub.collectAsState()
+    val releaseNotifications by SettingsStore.releaseNotifications.collectAsState()
+    val syncSavedToAniList by SettingsStore.syncSavedToAniList.collectAsState()
+    val isRefreshing by vm.isRefreshing.collectAsState()
     var showLogin by remember { mutableStateOf(false) }
-    var selectedListName by rememberSaveable { mutableStateOf(ProfileListKind.WATCHING.name) }
+    var selectedViewName by rememberSaveable { mutableStateOf(LibraryView.WATCHLIST.name) }
     var selectedFormat by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedAiring by rememberSaveable { mutableStateOf<String?>(null) }
     var titleFilter by rememberSaveable { mutableStateOf("") }
 
-    LaunchedEffect(token) { vm.loadIfLoggedIn() }
+    LaunchedEffect(token) {
+        if (token == null) selectedViewName = LibraryView.WATCHLIST.name
+        vm.loadIfLoggedIn()
+    }
 
     if (showLogin) {
         LoginWebView(
@@ -151,15 +168,51 @@ fun ProfileScreen(
         return
     }
 
-    val selectedList = ProfileListKind.valueOf(selectedListName)
     val profile = (profileState as? UiState.Success)?.data
-    val listEntries = remember(profile, selectedList, selectedFormat, selectedAiring, titleFilter) {
-        profile?.let(selectedList::entries).orEmpty().filter { entry ->
-            val media = entry.media ?: return@filter false
-            (selectedFormat == null || media.format == selectedFormat) &&
-                (selectedAiring == null || media.status == selectedAiring) &&
-                (titleFilter.isBlank() || media.title.preferred.contains(titleFilter, ignoreCase = true))
+    val combinedWatchlist = remember(profile, watchlist, history) {
+        buildCombinedWatchlist(profile, watchlist, history)
+    }
+    val selectedView = LibraryView.valueOf(selectedViewName)
+    val selectedCards = remember(profile, combinedWatchlist, selectedView, selectedFormat, selectedAiring, titleFilter) {
+        val source = when (selectedView) {
+            LibraryView.WATCHLIST -> combinedWatchlist
+            LibraryView.WATCHING -> aniListCards(profile?.watching.orEmpty())
+            LibraryView.REWATCHING -> aniListCards(profile?.rewatching.orEmpty())
+            LibraryView.PAUSED -> aniListCards(profile?.paused.orEmpty())
+            LibraryView.COMPLETED -> aniListCards(profile?.completed.orEmpty())
+            LibraryView.DROPPED -> aniListCards(profile?.dropped.orEmpty())
         }
+        source.filter { entry ->
+            (selectedFormat == null || entry.format == selectedFormat) &&
+                (selectedAiring == null || entry.airingStatus == selectedAiring) &&
+                (titleFilter.isBlank() || entry.title.contains(titleFilter, ignoreCase = true))
+        }
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        SettingsStore.setReleaseNotifications(granted)
+        if (granted) ReleaseSyncScheduler.runNow(context)
+    }
+
+    fun setReleaseNotifications(enabled: Boolean) {
+        if (!enabled) {
+            SettingsStore.setReleaseNotifications(false)
+            AutomaticReleaseManager.cancelAll()
+        } else if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            SettingsStore.setReleaseNotifications(true)
+            ReleaseSyncScheduler.runNow(context)
+        }
+    }
+
+    fun setSavedSync(enabled: Boolean) {
+        SettingsStore.setSyncSavedToAniList(enabled)
+        if (enabled) LibraryStore.syncSavedToAniList()
     }
 
     Scaffold(
@@ -171,43 +224,70 @@ fun ProfileScreen(
             )
         },
     ) { padding ->
-        LazyColumn(
+        PullRefreshContainer(
+            isRefreshing = isRefreshing,
+            onRefresh = vm::refresh,
             modifier = Modifier.padding(padding).fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
             item {
                 ProfileHero(
                     loggedIn = token != null,
                     state = profileState,
                     onLogin = { showLogin = true },
-                    onSync = vm::loadIfLoggedIn,
+                    onSync = { vm.loadIfLoggedIn() },
                     onLogout = vm::logout,
                 )
             }
 
             profile?.let { loaded ->
                 item { ProfileStats(loaded) }
+            }
+
+            item {
+                LibraryFilters(
+                    selectedView = selectedView,
+                    onViewChange = { selectedViewName = it.name },
+                    selectedFormat = selectedFormat,
+                    onFormatChange = { selectedFormat = it },
+                    selectedAiring = selectedAiring,
+                    onAiringChange = { selectedAiring = it },
+                    titleFilter = titleFilter,
+                    onTitleFilterChange = { titleFilter = it },
+                    resultCount = selectedCards.size,
+                    showAniListLists = profile != null,
+                )
+            }
+            item {
+                ProfileSectionTitle(
+                    selectedView.label,
+                    if (selectedView == LibraryView.WATCHLIST) "Saved here and in AniList Planning" else "Synced from AniList",
+                )
+            }
+            if (selectedCards.isEmpty()) {
                 item {
-                    LibraryFilters(
-                        profile = loaded,
-                        selectedList = selectedList,
-                        onListChange = { selectedListName = it.name },
-                        selectedFormat = selectedFormat,
-                        onFormatChange = { selectedFormat = it },
-                        selectedAiring = selectedAiring,
-                        onAiringChange = { selectedAiring = it },
-                        titleFilter = titleFilter,
-                        onTitleFilterChange = { titleFilter = it },
-                        resultCount = listEntries.size,
+                    EmptyPanel(
+                        if (selectedView == LibraryView.WATCHLIST && selectedFormat == null && selectedAiring == null && titleFilter.isBlank()) {
+                            "Tap the heart on any anime to save it"
+                        } else {
+                            "No anime match these filters"
+                        },
                     )
                 }
-                item { AniListTableHeader(selectedList, listEntries.size) }
-                if (listEntries.isEmpty()) {
-                    item { EmptyPanel("No anime match these filters") }
-                } else {
-                    items(listEntries, key = { it.id }) { entry ->
-                        AniListTableRow(entry, onAnimeClick)
+            } else {
+                item {
+                    LazyRow(
+                        modifier = Modifier.focusGroup(),
+                        contentPadding = PaddingValues(horizontal = device.pagePadding),
+                        horizontalArrangement = Arrangement.spacedBy(if (device.isTv) 18.dp else 12.dp),
+                    ) {
+                        items(selectedCards, key = { it.id }) { entry ->
+                            SavedAnimeCard(entry, onAnimeClick)
+                        }
                     }
                 }
             }
@@ -227,28 +307,17 @@ fun ProfileScreen(
                 }
             }
 
-            item { ProfileSectionTitle("Watchlist", "Saved on this device") }
-            if (watchlist.isEmpty()) {
-                item { EmptyPanel("Tap the heart on any anime to save it") }
-            } else {
-                items(watchlist.chunked(device.episodeColumns.coerceAtMost(6))) { row ->
-                    val columns = device.episodeColumns.coerceAtMost(6)
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = device.pagePadding),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        row.forEach { entry -> WatchlistCard(entry, onAnimeClick, Modifier.weight(1f)) }
-                        repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
-                    }
-                }
-            }
-
             item {
                 SettingsPanel(
                     autoplay = autoplay,
                     preferDub = preferDub,
                     autoSync = autoSync,
+                    releaseNotifications = releaseNotifications,
+                    syncSavedToAniList = syncSavedToAniList,
+                    onReleaseNotificationsChange = ::setReleaseNotifications,
+                    onSavedSyncChange = ::setSavedSync,
                 )
+            }
             }
         }
     }
@@ -376,9 +445,8 @@ private fun ProfileStat(value: String, label: String, modifier: Modifier = Modif
 
 @Composable
 private fun LibraryFilters(
-    profile: AniListProfile,
-    selectedList: ProfileListKind,
-    onListChange: (ProfileListKind) -> Unit,
+    selectedView: LibraryView,
+    onViewChange: (LibraryView) -> Unit,
     selectedFormat: String?,
     onFormatChange: (String?) -> Unit,
     selectedAiring: String?,
@@ -386,17 +454,17 @@ private fun LibraryFilters(
     titleFilter: String,
     onTitleFilterChange: (String) -> Unit,
     resultCount: Int,
+    showAniListLists: Boolean,
 ) {
     val device = LocalAppDeviceProfile.current
+    val viewOptions = (if (showAniListLists) LibraryView.entries else listOf(LibraryView.WATCHLIST))
+        .map { SelectOption(it.name, it.label) }
     Panel(Modifier.padding(horizontal = device.pagePadding)) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            val listOptions = ProfileListKind.entries.map { kind ->
-                SelectOption(kind.name, "${kind.label} (${kind.entries(profile).size})")
-            }
             SelectorField(
-                value = listOptions.first { it.value == selectedList.name }.label,
-                options = listOptions,
-                onSelect = { value -> ProfileListKind.entries.firstOrNull { it.name == value }?.let(onListChange) },
+                value = selectedView.label,
+                options = viewOptions,
+                onSelect = { value -> LibraryView.entries.firstOrNull { it.name == value }?.let(onViewChange) },
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -425,15 +493,11 @@ private fun LibraryFilters(
                 shape = RoundedCornerShape(9.dp),
                 singleLine = true,
             )
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "$resultCount ${selectedList.label}",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(Icons.Default.GridView, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            Text(
+                "$resultCount anime",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -453,7 +517,10 @@ private fun SelectorField(
             color = MaterialTheme.colorScheme.background,
             border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         ) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(value, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Icon(Icons.Default.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -466,61 +533,6 @@ private fun SelectorField(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun AniListTableHeader(kind: ProfileListKind, count: Int) {
-    val device = LocalAppDeviceProfile.current
-    Column(Modifier.padding(horizontal = device.pagePadding, vertical = 4.dp)) {
-        Text("${kind.label} list", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 10.dp)) {
-            Text("Title", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Text("Score", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.width(58.dp))
-            Text("Progress", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, modifier = Modifier.width(68.dp))
-        }
-        Text("$count entries", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun AniListTableRow(entry: MediaListEntry, onAnimeClick: (Int) -> Unit) {
-    val media = entry.media ?: return
-    val device = LocalAppDeviceProfile.current
-    val score = when {
-        entry.score > 0 -> String.format(Locale.US, "%.1f", entry.score)
-        media.averageScore != null -> String.format(Locale.US, "%.1f", media.averageScore / 10.0)
-        else -> "—"
-    }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = device.pagePadding)
-            .focusHighlight(RoundedCornerShape(9.dp))
-            .clip(RoundedCornerShape(9.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(9.dp))
-            .clickable { onAnimeClick(media.id) }
-            .padding(9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
-        AsyncImage(
-            model = media.coverImage.best,
-            contentDescription = media.title.preferred,
-            modifier = Modifier.padding(start = 9.dp).size(width = 44.dp, height = 58.dp).clip(RoundedCornerShape(7.dp)),
-            contentScale = ContentScale.Crop,
-        )
-        Text(
-            media.title.preferred,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
-        )
-        Text(score, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(58.dp))
-        Text("${entry.progress}/${media.episodes ?: "?"}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(68.dp))
     }
 }
 
@@ -552,19 +564,72 @@ private fun HistoryCard(entry: HistoryEntry, onResume: (HistoryEntry) -> Unit) {
 }
 
 @Composable
-private fun WatchlistCard(entry: WatchlistEntry, onAnimeClick: (Int) -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.focusHighlight().clickable { onAnimeClick(entry.anilistId) }) {
-        Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp))) {
+private fun SavedAnimeCard(entry: SavedAnimeCardData, onAnimeClick: (Int) -> Unit) {
+    val device = LocalAppDeviceProfile.current
+    Column(Modifier.width(device.posterWidth).focusHighlight().clickable { onAnimeClick(entry.id) }) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(9.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
             AsyncImage(entry.cover, entry.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            entry.averageScore?.let { RatingBadge(it, Modifier.align(Alignment.TopStart).padding(5.dp)) }
+            when {
+                entry.userScore != null -> CornerBadge(
+                    text = String.format(Locale.US, "★ %.1f", entry.userScore),
+                    modifier = Modifier.align(Alignment.TopStart).padding(5.dp),
+                )
+                entry.averageScore != null -> RatingBadge(entry.averageScore, Modifier.align(Alignment.TopStart).padding(5.dp))
+            }
+            entry.progress?.let { progress ->
+                CornerBadge(
+                    text = "$progress/${entry.totalEpisodes ?: "?"}",
+                    modifier = Modifier.align(Alignment.TopEnd).padding(5.dp),
+                )
+            }
         }
-        Text(entry.title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp))
-        Text(entry.format.orEmpty().replace('_', ' '), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            entry.title,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 5.dp),
+        )
+        Text(
+            listOfNotNull(entry.status?.toDisplayLabel(), entry.format?.replace('_', ' ')).joinToString("  ·  "),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
 @Composable
-private fun SettingsPanel(autoplay: Boolean, preferDub: Boolean, autoSync: Boolean) {
+private fun CornerBadge(text: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(5.dp),
+        color = Color.Black.copy(alpha = .82f),
+    ) {
+        Text(
+            text,
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+        )
+    }
+}
+
+@Composable
+private fun SettingsPanel(
+    autoplay: Boolean,
+    preferDub: Boolean,
+    autoSync: Boolean,
+    releaseNotifications: Boolean,
+    syncSavedToAniList: Boolean,
+    onReleaseNotificationsChange: (Boolean) -> Unit,
+    onSavedSyncChange: (Boolean) -> Unit,
+) {
     val device = LocalAppDeviceProfile.current
     Panel(Modifier.padding(horizontal = device.pagePadding, vertical = 8.dp)) {
         Column(Modifier.padding(vertical = 8.dp)) {
@@ -572,6 +637,18 @@ private fun SettingsPanel(autoplay: Boolean, preferDub: Boolean, autoSync: Boole
             SettingSwitch("Autoplay next episode", "Continue automatically", autoplay, SettingsStore::setAutoplay)
             SettingSwitch("Prefer dubbed audio", "Use dub first when available", preferDub, SettingsStore::setPreferDub)
             SettingSwitch("Sync progress to AniList", "Update episode progress while watching", autoSync, SettingsStore::setAutoSyncAniList)
+            SettingSwitch(
+                "Sync saved anime to AniList",
+                "New saves are added to Planning without replacing active list progress",
+                syncSavedToAniList,
+                onSavedSyncChange,
+            )
+            SettingSwitch(
+                "New episode alerts",
+                "Notify when an episode airs for saved or favourite anime",
+                releaseNotifications,
+                onReleaseNotificationsChange,
+            )
             HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outline)
             TextButton(onClick = LibraryStore::clearHistory, modifier = Modifier.padding(horizontal = 8.dp).focusHighlight(RoundedCornerShape(8.dp))) {
                 Text("Clear viewing history")
@@ -621,4 +698,78 @@ private fun joinedLabel(createdAt: Long?): String? {
             .atZone(ZoneId.systemDefault())
             .format(DateTimeFormatter.ofPattern("MMM yyyy"))
     }.getOrNull()
+}
+
+private fun buildCombinedWatchlist(
+    profile: AniListProfile?,
+    local: List<WatchlistEntry>,
+    history: List<HistoryEntry>,
+): List<SavedAnimeCardData> {
+    val aniListPlanning = profile?.planning.orEmpty().distinctBy { it.media?.id }
+    val byMediaId = aniListPlanning.mapNotNull { entry -> entry.media?.id?.let { it to entry } }.toMap()
+    val historyById = history.associateBy { it.anilistId }
+
+    return buildList {
+        local.forEach { saved ->
+            val aniListEntry = byMediaId[saved.anilistId]
+            val media = aniListEntry?.media
+            add(
+                SavedAnimeCardData(
+                    id = saved.anilistId,
+                    title = media?.title?.preferred ?: saved.title,
+                    cover = media?.coverImage?.best ?: saved.cover,
+                    format = media?.format ?: saved.format,
+                    airingStatus = media?.status,
+                    status = aniListEntry?.status,
+                    userScore = aniListEntry?.score?.takeIf { it > 0 },
+                    averageScore = media?.averageScore ?: saved.averageScore,
+                    progress = aniListEntry?.progress ?: historyById[saved.anilistId]?.episodeNumber?.toInt(),
+                    totalEpisodes = media?.episodes,
+                ),
+            )
+        }
+        aniListPlanning.forEach { aniListEntry ->
+            val media = aniListEntry.media ?: return@forEach
+            if (local.any { it.anilistId == media.id }) return@forEach
+            add(
+                SavedAnimeCardData(
+                    id = media.id,
+                    title = media.title.preferred,
+                    cover = media.coverImage.best,
+                    format = media.format,
+                    airingStatus = media.status,
+                    status = aniListEntry.status,
+                    userScore = aniListEntry.score.takeIf { it > 0 },
+                    averageScore = media.averageScore,
+                    progress = aniListEntry.progress,
+                    totalEpisodes = media.episodes,
+                ),
+            )
+        }
+    }
+}
+
+private fun aniListCards(entries: List<MediaListEntry>): List<SavedAnimeCardData> =
+    entries.mapNotNull { entry ->
+        val media = entry.media ?: return@mapNotNull null
+        SavedAnimeCardData(
+            id = media.id,
+            title = media.title.preferred,
+            cover = media.coverImage.best,
+            format = media.format,
+            airingStatus = media.status,
+            status = entry.status,
+            userScore = entry.score.takeIf { it > 0 },
+            averageScore = media.averageScore,
+            progress = entry.progress,
+            totalEpisodes = media.episodes,
+        )
+    }.distinctBy { it.id }
+
+private fun String.toDisplayLabel(): String = when (this) {
+    "CURRENT" -> "Watching"
+    "REPEATING" -> "Re-watching"
+    "PLANNING" -> "Planning"
+    "PAUSED" -> "Paused"
+    else -> lowercase().replace('_', ' ').replaceFirstChar { it.titlecase(Locale.getDefault()) }
 }
