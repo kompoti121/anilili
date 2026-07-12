@@ -14,6 +14,7 @@ import com.miruronative.data.model.EpisodesResult
 import com.miruronative.data.model.SourcesResult
 import com.miruronative.data.model.StreamItem
 import com.miruronative.ui.UiState
+import com.miruronative.ui.rethrowIfCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.Job
@@ -76,6 +77,7 @@ class WatchViewModel : ViewModel() {
                 val startNumber = episodeNumber.toDoubleOrNull() ?: spine.first().number
                 resolveAndPlay(startNumber)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 _state.value = UiState.Error(e.message ?: "Failed to load episode")
             }
         }
@@ -159,8 +161,7 @@ class WatchViewModel : ViewModel() {
     fun playIndex(index: Int) {
         if (index !in spine.indices) return
         failedProviders.clear()
-        resolveJob?.cancel()
-        resolveJob = viewModelScope.launch { resolveAndPlay(spine[index].number) }
+        launchResolve(spine[index].number)
     }
 
     fun next() {
@@ -175,23 +176,34 @@ class WatchViewModel : ViewModel() {
 
     fun retry() {
         failedProviders.clear()
+        launchResolve(lastRequestedNumber)
+    }
+
+    /** All episode resolution goes through here so a failure becomes an error state, not a crash. */
+    private fun launchResolve(number: Double, before: (suspend () -> Unit)? = null) {
         resolveJob?.cancel()
-        resolveJob = viewModelScope.launch { resolveAndPlay(lastRequestedNumber) }
+        resolveJob = viewModelScope.launch {
+            try {
+                before?.invoke()
+                resolveAndPlay(number)
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                _state.value = UiState.Error(e.message ?: "Failed to load episode")
+            }
+        }
     }
 
     fun onPlaybackError(message: String) {
         val data = (_state.value as? UiState.Success)?.data ?: return
         if (data.isResolving) return
         failedProviders += data.provider
-        resolveJob?.cancel()
-        resolveJob = viewModelScope.launch {
+        launchResolve(data.current.number) {
             _state.value = UiState.Success(
                 data.copy(
                     isResolving = true,
                     notice = "${ProviderCatalog.label(data.provider)} failed: $message. Trying another source…",
                 ),
             )
-            resolveAndPlay(data.current.number)
         }
     }
 

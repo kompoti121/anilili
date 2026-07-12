@@ -1,12 +1,14 @@
 package com.miruronative
 
 import android.app.Application
+import android.os.StrictMode
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.miruronative.data.AppGraph
 import com.miruronative.data.auth.AuthManager
+import com.miruronative.diagnostics.CrashReporter
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.data.reminder.ReminderManager
@@ -16,6 +18,15 @@ import com.miruronative.data.reminder.ReleaseSyncScheduler
 class MiruroApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
+        if (BuildConfig.DEBUG) {
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build(),
+            )
+            StrictMode.setVmPolicy(
+                StrictMode.VmPolicy.Builder().detectLeakedClosableObjects().penaltyLog().build(),
+            )
+        }
+        CrashReporter.init(this)
         AppGraph.init(this)
         LibraryStore.init(this)
         AuthManager.init(this)

@@ -10,6 +10,7 @@ import com.miruronative.data.model.DiscoverFilters
 import com.miruronative.data.model.DiscoverOptions
 import com.miruronative.data.model.Media
 import com.miruronative.ui.UiState
+import com.miruronative.ui.rethrowIfCancellation
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -81,7 +82,10 @@ class SearchViewModel : ViewModel() {
             if (force && _state.value is UiState.Success) _isRefreshing.value = true else _state.value = UiState.Loading
             runCatching { repo.discover(filters, force = force).items }
                 .onSuccess { _state.value = UiState.Success(it) }
-                .onFailure { _state.value = UiState.Error(it.message ?: "Could not load the catalog") }
+                .onFailure {
+                    it.rethrowIfCancellation()
+                    _state.value = UiState.Error(it.message ?: "Could not load the catalog")
+                }
             _isRefreshing.value = false
         }
     }

@@ -70,6 +70,16 @@ object PipeBridge {
                     main.postDelayed({ if (!ready.isCompleted) ready.complete(true) }, 2000)
                 }
             }
+
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: android.webkit.WebResourceError?,
+            ) {
+                // Main-frame load failed (offline, DNS, site down): unblock waiters so pipe
+                // requests fail fast to the cache/error path instead of stalling 25 s each.
+                if (request?.isForMainFrame == true && !ready.isCompleted) ready.complete(false)
+            }
         }
         wv.loadUrl("$ORIGIN/")
     }

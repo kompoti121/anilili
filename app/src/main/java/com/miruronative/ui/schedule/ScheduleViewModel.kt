@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.miruronative.data.AppGraph
 import com.miruronative.data.model.AiringSchedule
 import com.miruronative.ui.UiState
+import com.miruronative.ui.rethrowIfCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -37,6 +38,7 @@ class ScheduleViewModel : ViewModel() {
             try {
                 _state.value = UiState.Success(repo.schedule(selectedDay, force = force))
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 _state.value = UiState.Error(e.message ?: "Failed to load schedule")
             } finally {
                 _isRefreshing.value = false

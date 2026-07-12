@@ -17,6 +17,7 @@ local.properties
 *.aab
 *.jks
 *.keystore
+keystore.properties
 
 # Local/editor state
 .idea/

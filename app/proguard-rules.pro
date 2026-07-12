@@ -1,3 +1,7 @@
+# Readable crash reports from minified builds (CrashReporter).
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
+
 # kotlinx.serialization — keep @Serializable metadata and generated serializers.
 -keepattributes *Annotation*, InnerClasses
 -dontnote kotlinx.serialization.**

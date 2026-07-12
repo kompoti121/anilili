@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.miruronative.data.AppGraph
 import com.miruronative.data.model.Media
 import com.miruronative.ui.UiState
+import com.miruronative.ui.rethrowIfCancellation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,6 +62,7 @@ class HomeViewModel : ViewModel() {
                 }
                 _state.value = UiState.Success(data)
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 _state.value = UiState.Error(e.message ?: "Failed to load home")
             } finally {
                 _isRefreshing.value = false

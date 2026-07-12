@@ -8,6 +8,7 @@ import com.miruronative.data.model.MediaListEntry
 import com.miruronative.data.model.Viewer
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.ui.UiState
+import com.miruronative.ui.rethrowIfCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -50,6 +51,7 @@ class ProfileViewModel : ViewModel() {
                     AniListProfile(viewer, watching, rewatching, planning, paused, completed, dropped),
                 )
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 _profile.value = UiState.Error(e.message ?: "Failed to load AniList")
             } finally {
                 _isRefreshing.value = false

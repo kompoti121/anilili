@@ -10,6 +10,7 @@ import com.miruronative.data.model.Category
 import com.miruronative.data.model.EpisodesResult
 import com.miruronative.data.model.Media
 import com.miruronative.ui.UiState
+import com.miruronative.ui.rethrowIfCancellation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,6 +69,7 @@ class DetailViewModel : ViewModel() {
                 val err = if (merged.providers.isEmpty()) "No streaming sources found" else null
                 _state.value = UiState.Success(DetailData(info, merged, err, loadingMore = false))
             } catch (e: Exception) {
+                e.rethrowIfCancellation()
                 _state.value = UiState.Error(e.message ?: "Failed to load")
             } finally {
                 _isRefreshing.value = false

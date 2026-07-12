@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import com.miruronative.diagnostics.CrashReporter
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,10 +46,13 @@ object SettingsStore {
             produceFile = { app.preferencesDataStoreFile("anilili_settings") },
         )
         scope.launch {
-            migrateLegacyPreferences(app)
+            runCatching { migrateLegacyPreferences(app) }
+                .onFailure { CrashReporter.logNonFatal("Settings migration failed", it) }
             store.data
                 .catch { error ->
-                    if (error is IOException) emit(emptyPreferences()) else throw error
+                    // A settings read must never take the process down; fall back to defaults.
+                    if (error !is IOException) CrashReporter.logNonFatal("Settings read failed", error)
+                    emit(emptyPreferences())
                 }
                 .collect(::applyPreferences)
         }

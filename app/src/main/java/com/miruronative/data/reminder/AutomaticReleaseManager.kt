@@ -53,6 +53,9 @@ object AutomaticReleaseManager {
     private const val KEY_ALARMS = "alarms"
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private lateinit var appContext: Context
+
+    // Read/written from main (init, cancelAll, receivers) and WorkManager threads (sync).
+    private val lock = Any()
     private var alarms: List<ReleaseAlarm> = emptyList()
 
     fun init(context: Context) {
@@ -63,9 +66,11 @@ object AutomaticReleaseManager {
             },
         )
         val oldestUseful = System.currentTimeMillis() / 1000L - 24 * 60 * 60
-        alarms = read().filter { it.airingAt >= oldestUseful }
-        alarms.forEach(::schedule)
-        persist(alarms)
+        synchronized(lock) {
+            alarms = read().filter { it.airingAt >= oldestUseful }
+            alarms.forEach(::schedule)
+            persist(alarms)
+        }
     }
 
     fun sync(media: Collection<Media>) {
@@ -89,23 +94,29 @@ object AutomaticReleaseManager {
         }.distinctBy { it.id }
 
         val desiredIds = desired.mapTo(hashSetOf()) { it.id }
-        alarms.filterNot { it.id in desiredIds }.forEach(::cancel)
-        desired.forEach(::schedule)
-        alarms = desired
-        persist(alarms)
+        synchronized(lock) {
+            alarms.filterNot { it.id in desiredIds }.forEach(::cancel)
+            desired.forEach(::schedule)
+            alarms = desired
+            persist(alarms)
+        }
     }
 
     fun cancelAll() {
         if (!::appContext.isInitialized) return
-        alarms.forEach(::cancel)
-        alarms = emptyList()
-        persist(alarms)
+        synchronized(lock) {
+            alarms.forEach(::cancel)
+            alarms = emptyList()
+            persist(alarms)
+        }
     }
 
     fun markDelivered(id: String?) {
         if (id == null || !::appContext.isInitialized) return
-        alarms = alarms.filterNot { it.id == id }
-        persist(alarms)
+        synchronized(lock) {
+            alarms = alarms.filterNot { it.id == id }
+            persist(alarms)
+        }
     }
 
     private fun schedule(alarm: ReleaseAlarm) {

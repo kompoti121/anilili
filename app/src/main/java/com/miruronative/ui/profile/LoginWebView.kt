@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import com.miruronative.data.auth.AuthManager
+import com.miruronative.diagnostics.CrashReporter
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,38 +38,44 @@ fun LoginWebView(onToken: (String) -> Unit, onCancel: () -> Unit) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
-                    WebView(ctx).apply {
-                        isFocusable = true
-                        isFocusableInTouchMode = true
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.allowFileAccess = false
-                        settings.allowContentAccess = false
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                if (url != null && AuthManager.isRedirect(url)) {
-                                    view?.stopLoading()
-                                    AuthManager.extractToken(url)?.let(onToken)
+                    try {
+                        WebView(ctx).apply {
+                            isFocusable = true
+                            isFocusableInTouchMode = true
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
+                            webViewClient = object : WebViewClient() {
+                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                    if (url != null && AuthManager.isRedirect(url)) {
+                                        view?.stopLoading()
+                                        AuthManager.extractToken(url)?.let(onToken)
+                                    }
                                 }
-                            }
 
-                            override fun shouldOverrideUrlLoading(
-                                view: WebView?,
-                                request: WebResourceRequest?,
-                            ): Boolean {
-                                val url = request?.url?.toString() ?: return false
-                                if (AuthManager.isRedirect(url)) {
-                                    AuthManager.extractToken(url)?.let(onToken)
-                                    return true
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView?,
+                                    request: WebResourceRequest?,
+                                ): Boolean {
+                                    val url = request?.url?.toString() ?: return false
+                                    if (AuthManager.isRedirect(url)) {
+                                        AuthManager.extractToken(url)?.let(onToken)
+                                        return true
+                                    }
+                                    return false
                                 }
-                                return false
                             }
+                            loadUrl(AuthManager.AUTHORIZE_URL)
+                            if (device.isTv) post { requestFocus() }
                         }
-                        loadUrl(AuthManager.AUTHORIZE_URL)
-                        if (device.isTv) post { requestFocus() }
+                    } catch (e: Throwable) {
+                        CrashReporter.logNonFatal("System WebView unavailable; AniList login disabled", e)
+                        android.view.View(ctx)
                     }
                 },
-                onRelease = { web ->
+                onRelease = { view ->
+                    val web = view as? WebView ?: return@AndroidView
                     web.stopLoading()
                     web.loadUrl("about:blank")
                     web.clearHistory()

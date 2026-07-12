@@ -98,15 +98,15 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (!player.playWhenReady || player.mediaItemCount == 0) stopSelf()
+        if (!::player.isInitialized || !player.playWhenReady || player.mediaItemCount == 0) stopSelf()
     }
 
     override fun onDestroy() {
         activeHttpFactory = null
         activePlayer = null
         PlaybackStatus.update(false)
-        session.release()
-        player.release()
+        if (::session.isInitialized) session.release()
+        if (::player.isInitialized) player.release()
         super.onDestroy()
     }
 

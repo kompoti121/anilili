@@ -21,6 +21,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import com.miruronative.diagnostics.CrashReporter
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 
 /**
@@ -86,35 +87,42 @@ fun EmbedWebView(
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
-                WebView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                    isFocusable = true
-                    isFocusableInTouchMode = true
-                    with(settings) {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        mediaPlaybackRequiresUserGesture = false
-                        loadWithOverviewMode = true
-                        useWideViewPort = true
-                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                        allowFileAccess = false
-                        allowContentAccess = false
-                        userAgentString = userAgentString.replace("; wv", "") // look less like a webview
+                try {
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                        isFocusable = true
+                        isFocusableInTouchMode = true
+                        with(settings) {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            mediaPlaybackRequiresUserGesture = false
+                            loadWithOverviewMode = true
+                            useWideViewPort = true
+                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                            allowFileAccess = false
+                            allowContentAccess = false
+                            userAgentString = userAgentString.replace("; wv", "") // look less like a webview
+                        }
+                        webViewClient = WebViewClient()
+                        webChromeClient = chromeClient
+                        if (device.isTv) post { requestFocus() }
                     }
-                    webViewClient = WebViewClient()
-                    webChromeClient = chromeClient
-                    if (device.isTv) post { requestFocus() }
+                } catch (e: Throwable) {
+                    CrashReporter.logNonFatal("System WebView unavailable; embed player disabled", e)
+                    View(ctx).apply { setBackgroundColor(android.graphics.Color.BLACK) }
                 }
             },
-            update = { web ->
+            update = { view ->
+                val web = view as? WebView ?: return@AndroidView
                 val headers = referer?.let { mapOf("Referer" to it) } ?: emptyMap()
                 if (web.url != url) web.loadUrl(url, headers)
             },
-            onRelease = { web ->
+            onRelease = { view ->
+                val web = view as? WebView ?: return@AndroidView
                 web.stopLoading()
                 web.loadUrl("about:blank")
                 web.clearHistory()

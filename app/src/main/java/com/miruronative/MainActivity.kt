@@ -63,6 +63,8 @@ import androidx.navigation.navArgument
 import androidx.core.content.ContextCompat
 import com.miruronative.data.reminder.AutomaticReleaseManager
 import com.miruronative.data.reminder.ReleaseSyncScheduler
+import com.miruronative.diagnostics.CrashReportDialog
+import com.miruronative.diagnostics.CrashReporter
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.ui.detail.DetailScreen
 import com.miruronative.ui.home.HomeScreen
@@ -101,6 +103,13 @@ class MainActivity : ComponentActivity() {
                         pendingRoute = pendingRoute,
                         onRouteConsumed = { pendingRoute = null },
                     )
+                    var crashReport by remember { mutableStateOf(CrashReporter.pendingReport()) }
+                    crashReport?.let { report ->
+                        CrashReportDialog(report) {
+                            CrashReporter.clear()
+                            crashReport = null
+                        }
+                    }
                 }
             }
         }
@@ -111,15 +120,17 @@ class MainActivity : ComponentActivity() {
                 } else {
                     window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !isTelevision()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && supportsPictureInPicture()) {
                     val root = window.decorView
-                    setPictureInPictureParams(
-                        PictureInPictureParams.Builder()
-                            .setAspectRatio(Rational(16, 9))
-                            .setAutoEnterEnabled(playing)
-                            .setSourceRectHint(Rect(0, 0, root.width.coerceAtLeast(1), root.height.coerceAtLeast(1)))
-                            .build(),
-                    )
+                    runCatching {
+                        setPictureInPictureParams(
+                            PictureInPictureParams.Builder()
+                                .setAspectRatio(Rational(16, 9))
+                                .setAutoEnterEnabled(playing)
+                                .setSourceRectHint(Rect(0, 0, root.width.coerceAtLeast(1), root.height.coerceAtLeast(1)))
+                                .build(),
+                        )
+                    }
                 }
             }
         }
@@ -133,14 +144,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && !isTelevision() && PlaybackStatus.isPlaying.value) {
-            enterPictureInPictureMode(
-                PictureInPictureParams.Builder()
-                    .setAspectRatio(Rational(16, 9))
-                    .build(),
-            )
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && supportsPictureInPicture() && PlaybackStatus.isPlaying.value) {
+            runCatching {
+                enterPictureInPictureMode(
+                    PictureInPictureParams.Builder()
+                        .setAspectRatio(Rational(16, 9))
+                        .build(),
+                )
+            }
         }
     }
+
+    private fun supportsPictureInPicture(): Boolean = !isTelevision() &&
+        packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
 
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,
