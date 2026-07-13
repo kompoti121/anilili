@@ -4,6 +4,7 @@ import android.content.Context
 import com.miruronative.data.cache.AppCache
 import com.miruronative.data.remote.AniListClient
 import com.miruronative.data.remote.AnivexaClient
+import com.miruronative.data.remote.JikanClient
 import com.miruronative.data.remote.PipeClient
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -44,6 +45,7 @@ object AppGraph {
             aniList = aniList,
             pipe = PipeClient(json),
             anivexa = AnivexaClient(httpClient, json, aniList),
+            jikan = JikanClient(httpClient, json),
             cache = AppCache(context, json),
         )
     }

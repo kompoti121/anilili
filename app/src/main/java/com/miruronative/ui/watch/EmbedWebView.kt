@@ -17,8 +17,6 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.FrameLayout
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
@@ -77,8 +75,6 @@ fun EmbedWebView(
 ) {
     val device = LocalAppDeviceProfile.current
     val lifecycleOwner = LocalContext.current.findLifecycleOwner()
-    var customView by remember { mutableStateOf<View?>(null) }
-    var customViewCallback by remember { mutableStateOf<CustomViewCallback?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var webView by remember { mutableStateOf<WebView?>(null) }
     val currentOnFullscreenChanged by rememberUpdatedState(onFullscreenChanged)
@@ -134,27 +130,17 @@ fun EmbedWebView(
                 resultMsg: android.os.Message?,
             ): Boolean = false
 
+            // Android's custom-view fullscreen detaches the page's <video> into a separate
+            // surface, and the rotation we trigger right after tears that surface down —
+            // Chromium exits fullscreen and the embed player re-initializes mid-episode.
+            // Embed pages are full-bleed players already, so fullscreen is implemented by
+            // denying the custom view and expanding the WebView natively instead.
             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                if (view == null) {
-                    callback?.onCustomViewHidden()
-                    return
-                }
-                if (customView != null) {
-                    callback?.onCustomViewHidden()
-                    return
-                }
-
-                customView = view
-                customViewCallback = callback
+                callback?.onCustomViewHidden()
                 currentOnFullscreenChanged(true)
             }
 
             override fun onHideCustomView() {
-                val fullscreenView = customView ?: return
-                (fullscreenView.parent as? ViewGroup)?.removeView(fullscreenView)
-                customView = null
-                customViewCallback?.onCustomViewHidden()
-                customViewCallback = null
                 currentOnFullscreenChanged(false)
             }
         }
@@ -195,20 +181,6 @@ fun EmbedWebView(
                 if (request?.isForMainFrame == true) {
                     loadError = "HTTP ${errorResponse?.statusCode ?: "error"} from the video server"
                 }
-            }
-        }
-    }
-
-    BackHandler(enabled = customView != null) { chromeClient.onHideCustomView() }
-
-    DisposableEffect(chromeClient) {
-        onDispose {
-            val fullscreenView = customView
-            if (fullscreenView != null) {
-                (fullscreenView.parent as? ViewGroup)?.removeView(fullscreenView)
-                customView = null
-                customViewCallback?.onCustomViewHidden()
-                customViewCallback = null
             }
         }
     }
@@ -356,33 +328,6 @@ fun EmbedWebView(
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
-        }
-
-        customView?.let { fullscreenView ->
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    FrameLayout(ctx).apply {
-                        setBackgroundColor(android.graphics.Color.BLACK)
-                        isFocusable = true
-                        descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
-                    }
-                },
-                update = { container ->
-                    if (fullscreenView.parent !== container) {
-                        (fullscreenView.parent as? ViewGroup)?.removeView(fullscreenView)
-                        container.removeAllViews()
-                        container.addView(
-                            fullscreenView,
-                            FrameLayout.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                            ),
-                        )
-                    }
-                },
-                onRelease = { container -> container.removeAllViews() },
-            )
         }
 
         val action: Pair<String, () -> Unit>? = when {

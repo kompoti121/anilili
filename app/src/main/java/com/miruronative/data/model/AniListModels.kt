@@ -236,3 +236,19 @@ data class GqlMediaListResponse(val data: MediaListCollectionData? = null)
 /** A page of results plus whether more exist — used to drive infinite scroll. */
 @Serializable
 data class MediaPage(val items: List<Media>, val hasNextPage: Boolean, val page: Int)
+
+/** One AniList notification, flattened for the in-app notifications screen. */
+data class AppNotification(
+    val id: Int,
+    val kind: Kind,
+    val createdAt: Long, // epoch seconds
+    val title: String,
+    val badge: String?,
+    val detail: String?,
+    val mediaId: Int?,
+    val image: String?,
+    val banner: String?,
+    val unread: Boolean,
+) {
+    enum class Kind { AIRING, MEDIA, SOCIAL }
+}

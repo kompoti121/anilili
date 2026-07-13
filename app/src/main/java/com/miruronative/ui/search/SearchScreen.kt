@@ -52,8 +52,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -84,6 +91,7 @@ fun SearchScreen(
     val options by vm.options.collectAsState()
     val device = LocalAppDeviceProfile.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val focusRequester = remember { FocusRequester() }
     var showFilters by remember { mutableStateOf(false) }
 
@@ -121,7 +129,21 @@ fun SearchScreen(
                         modifier = Modifier
                             .weight(1f)
                             .widthIn(min = 0.dp, max = 720.dp)
-                            .focusRequester(focusRequester),
+                            .focusRequester(focusRequester)
+                            // TV: the text field consumes D-pad Down for cursor handling, so
+                            // focus can never escape into the results. Hand it off manually.
+                            .onPreviewKeyEvent { event ->
+                                if (device.isTv &&
+                                    event.type == KeyEventType.KeyDown &&
+                                    event.key == Key.DirectionDown
+                                ) {
+                                    keyboard?.hide()
+                                    focusManager.moveFocus(FocusDirection.Down)
+                                    true
+                                } else {
+                                    false
+                                }
+                            },
                         placeholder = { Text("Search anime…") },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         trailingIcon = {
@@ -134,7 +156,10 @@ fun SearchScreen(
                         shape = RoundedCornerShape(10.dp),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            keyboard?.hide()
+                            focusManager.moveFocus(FocusDirection.Down)
+                        }),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = MaterialTheme.colorScheme.surface,
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface,

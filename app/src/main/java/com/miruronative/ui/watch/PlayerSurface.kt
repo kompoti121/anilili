@@ -156,8 +156,9 @@ fun PlayerSurface(
                         .setLabel(subtitle.label)
                         .apply {
                             // Sub streams carry the original audio, so surface the first
-                            // subtitle track without requiring a manual selection.
-                            if (index == 0 && category != "dub") {
+                            // subtitle track without requiring a manual selection. Dub
+                            // viewers opt in via Settings ("Subtitles with dubbed audio").
+                            if (index == 0 && (category != "dub" || SettingsStore.subtitlesWithDub.value)) {
                                 setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                             }
                         }
@@ -252,7 +253,14 @@ fun PlayerSurface(
                     setControllerVisibilityListener(
                         PlayerView.ControllerVisibilityListener { visibility ->
                             controllerVisible = visibility == View.VISIBLE
-                            if (visibility != View.VISIBLE) settingsExpanded = false
+                            if (visibility != View.VISIBLE) {
+                                settingsExpanded = false
+                                // TV: the controller's buttons held window focus; when they go
+                                // GONE focus is cleared entirely and every remote key except
+                                // Back lands nowhere. Reclaim focus so D-pad/OK can resummon
+                                // the controller (and reach play/pause).
+                                if (device.isTv) post { requestFocus() }
+                            }
                         },
                     )
                     if (onToggleFullscreen != null) {

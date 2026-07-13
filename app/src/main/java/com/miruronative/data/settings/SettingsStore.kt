@@ -45,6 +45,9 @@ object SettingsStore {
     private val _hideAdultContent = MutableStateFlow(true)
     val hideAdultContent = _hideAdultContent.asStateFlow()
 
+    private val _subtitlesWithDub = MutableStateFlow(false)
+    val subtitlesWithDub = _subtitlesWithDub.asStateFlow()
+
     fun init(context: Context) {
         val app = context.applicationContext
         store = PreferenceDataStoreFactory.create(
@@ -71,6 +74,7 @@ object SettingsStore {
     fun setSyncSavedToAniList(value: Boolean) = save(SYNC_SAVED_TO_ANILIST, value, _syncSavedToAniList)
     fun setAutoSkipIntroOutro(value: Boolean) = save(AUTO_SKIP_INTRO_OUTRO, value, _autoSkipIntroOutro)
     fun setHideAdultContent(value: Boolean) = save(HIDE_ADULT_CONTENT, value, _hideAdultContent)
+    fun setSubtitlesWithDub(value: Boolean) = save(SUBTITLES_WITH_DUB, value, _subtitlesWithDub)
 
     private fun save(key: Preferences.Key<Boolean>, value: Boolean, state: MutableStateFlow<Boolean>) {
         state.value = value
@@ -85,6 +89,7 @@ object SettingsStore {
         _syncSavedToAniList.value = prefs[SYNC_SAVED_TO_ANILIST] ?: true
         _autoSkipIntroOutro.value = prefs[AUTO_SKIP_INTRO_OUTRO] ?: false
         _hideAdultContent.value = prefs[HIDE_ADULT_CONTENT] ?: true
+        _subtitlesWithDub.value = prefs[SUBTITLES_WITH_DUB] ?: false
     }
 
     private suspend fun migrateLegacyPreferences(context: Context) {
@@ -110,5 +115,6 @@ object SettingsStore {
     private val SYNC_SAVED_TO_ANILIST = booleanPreferencesKey("sync_saved_to_anilist")
     private val AUTO_SKIP_INTRO_OUTRO = booleanPreferencesKey("auto_skip_intro_outro")
     private val HIDE_ADULT_CONTENT = booleanPreferencesKey("hide_adult_content")
+    private val SUBTITLES_WITH_DUB = booleanPreferencesKey("subtitles_with_dub")
     private val MIGRATED = booleanPreferencesKey("migrated_from_shared_preferences")
 }

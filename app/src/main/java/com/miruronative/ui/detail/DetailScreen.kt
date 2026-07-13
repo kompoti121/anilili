@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -508,5 +509,14 @@ private fun EpisodeChip(episode: EpisodeItem, onClick: () -> Unit, modifier: Mod
         contentAlignment = Alignment.Center,
     ) {
         Text(episode.displayNumber, style = MaterialTheme.typography.labelLarge)
+        if (episode.filler) {
+            Text(
+                "F",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 5.dp),
+            )
+        }
     }
 }

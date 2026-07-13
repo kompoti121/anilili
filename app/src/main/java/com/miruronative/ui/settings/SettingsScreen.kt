@@ -77,6 +77,7 @@ fun SettingsScreen(
     val preferDub by SettingsStore.preferDub.collectAsState()
     val releaseNotifications by SettingsStore.releaseNotifications.collectAsState()
     val hideAdultContent by SettingsStore.hideAdultContent.collectAsState()
+    val subtitlesWithDub by SettingsStore.subtitlesWithDub.collectAsState()
     val syncSavedToAniList by SettingsStore.syncSavedToAniList.collectAsState()
     val updateState by UpdateManager.state.collectAsState()
     val profile = (profileState as? UiState.Success<AniListProfile>)?.data
@@ -177,6 +178,14 @@ fun SettingsScreen(
             item { SettingSwitch("Autoplay next episode", "Continue automatically", autoplay, SettingsStore::setAutoplay) }
             item { SettingSwitch("Auto-skip intro and outro", "Use provider skip times when available", autoSkip, SettingsStore::setAutoSkipIntroOutro) }
             item { SettingSwitch("Prefer dubbed audio", "Use dub first when available", preferDub, SettingsStore::setPreferDub) }
+            item {
+                SettingSwitch(
+                    "Subtitles with dubbed audio",
+                    "Show subtitles on dubbed episodes too (applies from the next episode)",
+                    subtitlesWithDub,
+                    SettingsStore::setSubtitlesWithDub,
+                )
+            }
             item { SectionDivider() }
 
             item { SettingsSectionTitle("Content") }

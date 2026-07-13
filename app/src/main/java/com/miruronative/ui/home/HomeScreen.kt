@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
@@ -79,6 +80,7 @@ fun HomeScreen(
     onWatchNow: (Int) -> Unit,
     onResume: (HistoryEntry) -> Unit,
     onSearchClick: () -> Unit,
+    onNotificationsClick: () -> Unit,
     modifier: Modifier = Modifier,
     vm: HomeViewModel = viewModel(),
 ) {
@@ -101,6 +103,12 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = onNotificationsClick,
+                        modifier = Modifier.focusHighlight(CircleShape),
+                    ) {
+                        Icon(Icons.Default.Notifications, contentDescription = "Notifications")
+                    }
                     IconButton(
                         onClick = onSearchClick,
                         modifier = Modifier.focusHighlight(CircleShape),

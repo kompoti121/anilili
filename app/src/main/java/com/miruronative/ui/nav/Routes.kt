@@ -14,6 +14,8 @@ object Routes {
     /** Top-level destinations that show the bottom navigation bar. */
     val tabRoutes = setOf(HOME, SEARCH, SCHEDULE, MORE, SETTINGS)
 
+    const val NOTIFICATIONS = "notifications"
+
     const val DETAIL = "detail/{id}"
     fun detail(id: Int) = "detail/$id"
 

@@ -27,8 +27,10 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
@@ -50,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowInsetsCompat
@@ -79,11 +82,11 @@ fun WatchScreen(
         vm.start(animeId, provider, category, episode)
     }
     val state by vm.state.collectAsState()
-    var webFallback by remember { mutableStateOf(false) }
-    var fullscreen by remember { mutableStateOf(false) }
-
     val context = LocalContext.current
     val device = LocalAppDeviceProfile.current
+    var webFallback by remember { mutableStateOf(false) }
+    // TV plays fullscreen from the start; Back drops to the episode/source screen.
+    var fullscreen by remember { mutableStateOf(device.isTv) }
     val activity = remember(context) { context.findActivity() }
     val currentOnBack by rememberUpdatedState(onBack)
     val pauseAndBack = remember {
@@ -131,6 +134,12 @@ fun WatchScreen(
     BackHandler(enabled = fullscreen) { fullscreen = false }
     BackHandler(enabled = !fullscreen) { pauseAndBack() }
 
+    // Pause however the screen is left (back, Anime page, notification nav) — not just the
+    // Back gesture. PiP keeps this screen composed, so picture-in-picture is unaffected.
+    DisposableEffect(Unit) {
+        onDispose { PlaybackService.pauseActivePlayback() }
+    }
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (webFallback) {
             EmbedWebView(
@@ -168,7 +177,10 @@ fun WatchScreen(
                 onPrev = vm::prev,
                 onNext = vm::next,
                 onChangeSource = vm::changeSource,
-                onSelectEpisode = vm::playIndex,
+                onSelectEpisode = { index ->
+                    if (device.isTv) fullscreen = true
+                    vm.playIndex(index)
+                },
                 onWebFallback = { webFallback = true },
                 onToggleFullscreen = { fullscreen = !fullscreen },
                 onFullscreenChanged = { fullscreen = it },
@@ -198,6 +210,52 @@ private fun WatchContent(
     val device = LocalAppDeviceProfile.current
     val configuration = LocalConfiguration.current
     var sourceMenuExpanded by remember { mutableStateOf(false) }
+
+    // A dialog rather than a DropdownMenu: dialogs get reliable D-pad focus on TV, and the
+    // list is easier to hit on phones too.
+    if (sourceMenuExpanded) {
+        AlertDialog(
+            onDismissRequest = { sourceMenuExpanded = false },
+            title = { Text("Streaming source") },
+            text = {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    data.sourceOptions.forEach { option ->
+                        val selected = option.provider == data.provider && option.category == data.category
+                        TextButton(
+                            onClick = {
+                                sourceMenuExpanded = false
+                                if (!selected) onChangeSource(option.provider, option.category.api)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusHighlight(RoundedCornerShape(8.dp)),
+                        ) {
+                            Text(
+                                buildString {
+                                    append(ProviderCatalog.label(option.provider))
+                                    append(" ")
+                                    append(option.category.api.uppercase())
+                                    append(" • ${option.episodeCount} ep")
+                                    if (!option.hasCurrentEpisode) append(" • first available")
+                                    if (selected) append("  ✓")
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { sourceMenuExpanded = false }) { Text("Close") }
+            },
+        )
+    }
+
     Column(Modifier.fillMaxSize()) {
         val playerModifier = if (fullscreen) {
             Modifier.fillMaxSize()
@@ -343,39 +401,12 @@ private fun WatchContent(
                     ) {
                         Text("Anime page")
                     }
-                    Box {
-                        TextButton(
-                            onClick = { sourceMenuExpanded = true },
-                            enabled = data.sourceOptions.size > 1,
-                            modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
-                        ) {
-                            Text("Source: ${ProviderCatalog.label(data.provider)} ${data.category.api.uppercase()}")
-                        }
-                        DropdownMenu(
-                            expanded = sourceMenuExpanded,
-                            onDismissRequest = { sourceMenuExpanded = false },
-                        ) {
-                            data.sourceOptions.forEach { option ->
-                                val selected = option.provider == data.provider && option.category == data.category
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            buildString {
-                                                append(ProviderCatalog.label(option.provider))
-                                                append(" ")
-                                                append(option.category.api.uppercase())
-                                                if (!option.hasCurrentEpisode) append(" • first available")
-                                                if (selected) append(" ✓")
-                                            },
-                                        )
-                                    },
-                                    onClick = {
-                                        sourceMenuExpanded = false
-                                        onChangeSource(option.provider, option.category.api)
-                                    },
-                                )
-                            }
-                        }
+                    TextButton(
+                        onClick = { sourceMenuExpanded = true },
+                        enabled = data.sourceOptions.isNotEmpty(),
+                        modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
+                    ) {
+                        Text("Source: ${ProviderCatalog.label(data.provider)} ${data.category.api.uppercase()}")
                     }
                 }
                 data.notice?.let { notice ->
@@ -444,6 +475,16 @@ private fun EpisodeChip(
             color = if (selected) MaterialTheme.colorScheme.onPrimary
             else MaterialTheme.colorScheme.onSurface,
         )
+        if (episode.filler) {
+            Text(
+                "F",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = if (selected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                else MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 5.dp),
+            )
+        }
     }
 }
 

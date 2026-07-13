@@ -74,6 +74,7 @@ import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.adaptive.rememberAppDeviceProfile
 import com.miruronative.ui.nav.Routes
+import com.miruronative.ui.notifications.NotificationsScreen
 import com.miruronative.ui.profile.ProfileScreen
 import com.miruronative.ui.schedule.ScheduleScreen
 import com.miruronative.ui.search.SearchScreen
@@ -335,6 +336,13 @@ private fun AppNavHost(
                     },
                     onResume = { e -> nav.navigate(Routes.watch(e.anilistId, e.provider, e.category, e.episodeLabel)) },
                     onSearchClick = { nav.navigateTab(Routes.SEARCH) },
+                    onNotificationsClick = { nav.navigate(Routes.NOTIFICATIONS) { launchSingleTop = true } },
+                )
+            }
+            composable(Routes.NOTIFICATIONS) {
+                NotificationsScreen(
+                    onBack = { nav.popBackStack() },
+                    onAnimeClick = { id -> nav.navigate(Routes.detail(id)) },
                 )
             }
             composable(Routes.SEARCH) {

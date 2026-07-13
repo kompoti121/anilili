@@ -288,6 +288,92 @@ class AniListClient(
         all.distinctBy { it.id }
     }
 
+    /**
+     * Authenticated: the viewer's notification feed, newest first. AniList has no per-item
+     * read flag — the first [unreadCount] entries are the unread ones. Passing
+     * [markAllRead] resets the server-side unread counter.
+     */
+    suspend fun notifications(markAllRead: Boolean = false): Pair<List<com.miruronative.data.model.AppNotification>, Int> =
+        withContext(Dispatchers.IO) {
+            val mediaFields = "media { id title { romaji english } coverImage { large } bannerImage }"
+            val userFields = "user { id name avatar { large } }"
+            val gql = """
+                query (${'$'}reset: Boolean) {
+                  Viewer { unreadNotificationCount }
+                  Page(page: 1, perPage: 50) {
+                    notifications(resetNotificationCount: ${'$'}reset) {
+                      __typename
+                      ... on AiringNotification { id createdAt episode $mediaFields }
+                      ... on RelatedMediaAdditionNotification { id createdAt context $mediaFields }
+                      ... on MediaDataChangeNotification { id createdAt context $mediaFields }
+                      ... on MediaMergeNotification { id createdAt reason $mediaFields }
+                      ... on FollowingNotification { id createdAt context $userFields }
+                      ... on ActivityMessageNotification { id createdAt context $userFields }
+                      ... on ActivityMentionNotification { id createdAt context $userFields }
+                      ... on ActivityReplyNotification { id createdAt context $userFields }
+                      ... on ActivityLikeNotification { id createdAt context $userFields }
+                      ... on ActivityReplyLikeNotification { id createdAt context $userFields }
+                    }
+                  }
+                }
+            """.trimIndent()
+            val text = post(gql, buildJsonObject { put("reset", markAllRead) })
+            val root = json.parseToJsonElement(text).jsonObject["data"]?.jsonObject
+            val unreadCount = root?.get("Viewer")?.jsonObject
+                ?.get("unreadNotificationCount")?.jsonPrimitive?.intOrNull ?: 0
+            val items = (root?.get("Page")?.jsonObject?.get("notifications") as? kotlinx.serialization.json.JsonArray)
+                .orEmpty()
+                .mapIndexedNotNull { index, element ->
+                    parseNotification(element as? JsonObject ?: return@mapIndexedNotNull null, unread = index < unreadCount)
+                }
+            items to unreadCount
+        }
+
+    private fun parseNotification(obj: JsonObject, unread: Boolean): com.miruronative.data.model.AppNotification? {
+        val typename = obj["__typename"]?.jsonPrimitive?.contentOrNull ?: return null
+        val id = obj["id"]?.jsonPrimitive?.intOrNull ?: return null
+        val createdAt = obj["createdAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+        val media = obj["media"] as? JsonObject
+        val user = obj["user"] as? JsonObject
+        val mediaTitle = (media?.get("title") as? JsonObject)?.let {
+            it["english"]?.jsonPrimitive?.contentOrNull ?: it["romaji"]?.jsonPrimitive?.contentOrNull
+        }
+        val userName = user?.get("name")?.jsonPrimitive?.contentOrNull
+        val context = obj["context"]?.jsonPrimitive?.contentOrNull
+            ?: obj["reason"]?.jsonPrimitive?.contentOrNull
+        val kind = when (typename) {
+            "AiringNotification" -> com.miruronative.data.model.AppNotification.Kind.AIRING
+            "RelatedMediaAdditionNotification",
+            "MediaDataChangeNotification",
+            "MediaMergeNotification",
+            -> com.miruronative.data.model.AppNotification.Kind.MEDIA
+            else -> com.miruronative.data.model.AppNotification.Kind.SOCIAL
+        }
+        val badge = when (typename) {
+            "AiringNotification" -> obj["episode"]?.jsonPrimitive?.intOrNull?.let { "EP $it" }
+            "RelatedMediaAdditionNotification" -> "NEW RELATED"
+            "MediaDataChangeNotification", "MediaMergeNotification" -> "MEDIA UPDATE"
+            else -> null
+        }
+        return com.miruronative.data.model.AppNotification(
+            id = id,
+            kind = kind,
+            createdAt = createdAt,
+            title = mediaTitle ?: userName ?: "AniList",
+            badge = badge,
+            detail = if (kind == com.miruronative.data.model.AppNotification.Kind.SOCIAL) {
+                listOfNotNull(userName, context?.trim()).joinToString(" ").ifBlank { null }
+            } else {
+                null
+            },
+            mediaId = media?.get("id")?.jsonPrimitive?.intOrNull,
+            image = (media?.get("coverImage") as? JsonObject)?.get("large")?.jsonPrimitive?.contentOrNull
+                ?: (user?.get("avatar") as? JsonObject)?.get("large")?.jsonPrimitive?.contentOrNull,
+            banner = media?.get("bannerImage")?.jsonPrimitive?.contentOrNull,
+            unread = unread,
+        )
+    }
+
     /** Authenticated: the user's anime lists (Watching + Planning) with per-entry progress. */
     suspend fun userAnimeList(userId: Int): MediaListCollection? = withContext(Dispatchers.IO) {
         val gql = """

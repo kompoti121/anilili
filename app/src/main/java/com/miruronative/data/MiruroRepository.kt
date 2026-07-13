@@ -2,6 +2,7 @@ package com.miruronative.data
 
 import com.miruronative.data.model.AiringSchedule
 import com.miruronative.data.model.Category
+import com.miruronative.data.model.EpisodeItem
 import com.miruronative.data.model.EpisodesResult
 import com.miruronative.data.model.DiscoverFilters
 import com.miruronative.data.model.Media
@@ -11,12 +12,17 @@ import com.miruronative.data.cache.AppCache
 import com.miruronative.data.model.DiscoverOptions
 import com.miruronative.data.remote.AniListClient
 import com.miruronative.data.remote.AnivexaClient
+import com.miruronative.data.remote.JikanClient
 import com.miruronative.data.remote.PipeClient
 import com.miruronative.data.settings.SettingsStore
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.SetSerializer
 import kotlinx.serialization.builtins.nullable
+import kotlinx.serialization.builtins.serializer
 
 /**
  * Single entry point the UI talks to. Combines AniList metadata with two streaming backends —
@@ -26,6 +32,7 @@ class MiruroRepository(
     private val aniList: AniListClient,
     private val pipe: PipeClient,
     private val anivexa: AnivexaClient,
+    private val jikan: JikanClient,
     private val cache: AppCache,
 ) {
     /** User preference: keep hentai out of every browsing surface. */
@@ -80,11 +87,22 @@ class MiruroRepository(
 
     // ---- authenticated (AniList login) ----
     suspend fun viewer() = aniList.viewer()
+    suspend fun notifications(markAllRead: Boolean = false) = aniList.notifications(markAllRead)
     suspend fun favouriteAnime() = aniList.favouriteAnime()
     suspend fun userAnimeList(userId: Int) = aniList.userAnimeList(userId)
     suspend fun saveAniListProgress(mediaId: Int, progress: Int, completed: Boolean = false) =
         aniList.saveMediaListEntry(mediaId, if (completed) "COMPLETED" else "CURRENT", progress)
     suspend fun syncSavedAnime(mediaId: Int, saved: Boolean) = aniList.syncSavedAnime(mediaId, saved)
+
+    /** MAL filler episode numbers via Jikan; cached a week, empty on failure or no MAL id. */
+    suspend fun fillerEpisodes(malId: Int?): Set<Int> {
+        if (malId == null || malId <= 0) return emptySet()
+        return cache.getOrFetch(
+            key = "filler:$malId",
+            serializer = SetSerializer(Int.serializer()),
+            ttlMs = OPTIONS_TTL,
+        ) { withContext(Dispatchers.IO) { jikan.fillerEpisodes(malId) } }
+    }
 
     suspend fun animeInfo(id: Int, force: Boolean = false): Media? = cache.getOrFetch(
         key = "anime:v2:$id",
@@ -100,7 +118,7 @@ class MiruroRepository(
         serializer = EpisodesResult.serializer(),
         ttlMs = EPISODES_TTL,
         forceRefresh = force,
-    ) { pipe.getEpisodes(anilistId) }
+    ) { pipe.getEpisodes(anilistId) }.withFillerMarks(anilistId)
 
     /** Extra sources — Anivexa-API (can be slower; loaded in the background by the detail screen). */
     suspend fun anivexaEpisodes(anilistId: Int, force: Boolean = false): EpisodesResult = cache.getOrFetch(
@@ -108,7 +126,25 @@ class MiruroRepository(
         serializer = EpisodesResult.serializer(),
         ttlMs = EPISODES_TTL,
         forceRefresh = force,
-    ) { anivexa.getEpisodes(anilistId) }
+    ) { anivexa.getEpisodes(anilistId) }.withFillerMarks(anilistId)
+
+    /**
+     * Applies MAL filler flags to every provider's episode list. Providers rarely carry filler
+     * data themselves; Jikan is authoritative and cached, and a timeout keeps a slow first
+     * fetch from delaying episode loading.
+     */
+    private suspend fun EpisodesResult.withFillerMarks(anilistId: Int): EpisodesResult {
+        if (isEmpty) return this
+        val fillers = kotlinx.coroutines.withTimeoutOrNull(FILLER_FETCH_TIMEOUT_MS) {
+            runCatching { fillerEpisodes(animeInfo(anilistId)?.idMal) }.getOrDefault(emptySet())
+        } ?: return this
+        if (fillers.isEmpty()) return this
+        fun mark(episodes: List<EpisodeItem>): List<EpisodeItem> = episodes.map { episode ->
+            val isFiller = episode.number % 1.0 == 0.0 && episode.number.toInt() in fillers
+            if (isFiller && !episode.filler) episode.copy(filler = true) else episode
+        }
+        return EpisodesResult(providers.map { it.copy(sub = mark(it.sub), dub = mark(it.dub)) })
+    }
 
     /** Merged view of both sources — used where the full provider list is needed (watch screen). */
     suspend fun episodes(anilistId: Int): EpisodesResult = coroutineScope {
@@ -206,6 +242,7 @@ class MiruroRepository(
         const val AIRING_TTL = 30L * 60 * 1000
         const val COLLECTION_TTL = 4L * 60 * 60 * 1000
         const val EPISODES_TTL = 2L * 60 * 60 * 1000
+        const val FILLER_FETCH_TIMEOUT_MS = 3_500L
         const val INFO_TTL = 24L * 60 * 60 * 1000
         const val OPTIONS_TTL = 7L * 24 * 60 * 60 * 1000
     }
