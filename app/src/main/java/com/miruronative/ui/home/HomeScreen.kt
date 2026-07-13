@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,12 +37,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +70,7 @@ import com.miruronative.R
 import com.miruronative.data.library.HistoryEntry
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.model.Media
+import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.ui.UiState
 import com.miruronative.ui.components.ErrorBox
 import com.miruronative.ui.components.LoadingBox
@@ -71,6 +78,7 @@ import com.miruronative.ui.components.AnimeCard
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.components.PullRefreshContainer
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -88,6 +96,20 @@ fun HomeScreen(
     val isRefreshing by vm.isRefreshing.collectAsState()
     val history by LibraryStore.history.collectAsState()
     val device = LocalAppDeviceProfile.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var slowStartup by remember { mutableStateOf(false) }
+    var diagnosticsMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(state) {
+        slowStartup = false
+        diagnosticsMessage = null
+        if (state is UiState.Loading) {
+            delay(10_000)
+            slowStartup = true
+            DiagnosticsLog.event("Home still loading after 10 seconds")
+        }
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -121,7 +143,21 @@ fun HomeScreen(
         },
     ) { padding ->
         when (val s = state) {
-            is UiState.Loading -> LoadingBox(Modifier.padding(padding))
+            is UiState.Loading -> {
+                if (slowStartup) {
+                    StartupStillLoading(
+                        message = diagnosticsMessage,
+                        onRetry = { vm.load(force = true) },
+                        onShareDiagnostics = {
+                            DiagnosticsLog.share(context)
+                                .onFailure { diagnosticsMessage = it.message ?: "Couldn't share diagnostics" }
+                        },
+                        modifier = Modifier.padding(padding),
+                    )
+                } else {
+                    LoadingBox(Modifier.padding(padding))
+                }
+            }
             is UiState.Error -> ErrorBox(s.message, vm::load, Modifier.padding(padding))
             is UiState.Success -> PullRefreshContainer(
                 isRefreshing = isRefreshing,
@@ -136,6 +172,45 @@ fun HomeScreen(
                     onAnimeClick = onAnimeClick,
                     onWatchNow = onWatchNow,
                     onResume = onResume,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StartupStillLoading(
+    message: String?,
+    onRetry: () -> Unit,
+    onShareDiagnostics: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            Text(
+                "Still loading",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "If the screen stays blank, share diagnostics from here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TextButton(onClick = onRetry, modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp))) {
+                    Text("Retry")
+                }
+                Button(onClick = onShareDiagnostics, modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp))) {
+                    Text("Share diagnostics")
+                }
+            }
+            message?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

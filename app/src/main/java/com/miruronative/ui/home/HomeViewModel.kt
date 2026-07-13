@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.miruronative.data.AppGraph
+import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.data.model.DiscoverFilters
 import com.miruronative.data.model.Media
 import com.miruronative.ui.UiState
@@ -55,6 +56,7 @@ class HomeViewModel : ViewModel() {
 
     fun load(force: Boolean = false) {
         viewModelScope.launch {
+            DiagnosticsLog.event("Home load start force=$force")
             if (force && _state.value is UiState.Success) _isRefreshing.value = true else _state.value = UiState.Loading
             try {
                 val data = coroutineScope {
@@ -67,9 +69,14 @@ class HomeViewModel : ViewModel() {
                     val topRated = async { repo.topRated(force = force).items }
                     HomeData(spotlight.await(), newest.await(), popular.await(), movies.await(), topRated.await())
                 }
+                DiagnosticsLog.event(
+                    "Home load success spotlight=${data.spotlight.size} newest=${data.newest.size} " +
+                        "popular=${data.popular.size} movies=${data.movies.size} topRated=${data.topRated.size}",
+                )
                 _state.value = UiState.Success(data)
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
+                DiagnosticsLog.throwable("Home load failed", e)
                 _state.value = UiState.Error(e.message ?: "Failed to load home")
             } finally {
                 _isRefreshing.value = false

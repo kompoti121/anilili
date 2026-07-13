@@ -25,6 +25,7 @@ object CrashReporter {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             runCatching {
+                DiagnosticsLog.throwable("FATAL on thread ${thread.name}", throwable)
                 file.appendText(entry("FATAL on thread ${thread.name}", throwable))
             }
             previous?.uncaughtException(thread, throwable)
@@ -35,6 +36,7 @@ object CrashReporter {
     fun logNonFatal(what: String, throwable: Throwable) {
         val file = logFile ?: return
         runCatching {
+            DiagnosticsLog.throwable("NON-FATAL: $what", throwable)
             if (file.length() < MAX_LOG_BYTES) file.appendText(entry("NON-FATAL: $what", throwable))
         }
     }

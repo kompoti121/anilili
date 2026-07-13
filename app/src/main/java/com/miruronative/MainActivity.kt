@@ -65,6 +65,7 @@ import com.miruronative.data.reminder.AutomaticReleaseManager
 import com.miruronative.data.reminder.ReleaseSyncScheduler
 import com.miruronative.diagnostics.CrashReportDialog
 import com.miruronative.diagnostics.CrashReporter
+import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.data.update.UpdateManager
 import com.miruronative.ui.detail.DetailScreen
@@ -91,14 +92,20 @@ class MainActivity : ComponentActivity() {
     private var pendingRoute by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        DiagnosticsLog.event("MainActivity.onCreate start savedState=${savedInstanceState != null}")
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
         pendingRoute = intent.getStringExtra(Routes.EXTRA_ROUTE)
+        DiagnosticsLog.event("MainActivity pendingRoute=${pendingRoute ?: "none"}")
         handleAuthRedirect(intent)
+        DiagnosticsLog.event("MainActivity.setContent start")
         setContent {
+            LaunchedEffect(Unit) {
+                DiagnosticsLog.event("MainActivity content composed")
+            }
             MiruroTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -119,6 +126,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        DiagnosticsLog.event("MainActivity.setContent complete")
         lifecycleScope.launch {
             PlaybackStatus.isPlaying.collect { playing ->
                 if (playing) {
@@ -134,21 +142,25 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         pendingRoute = intent.getStringExtra(Routes.EXTRA_ROUTE)
+        DiagnosticsLog.event("MainActivity.onNewIntent pendingRoute=${pendingRoute ?: "none"}")
         handleAuthRedirect(intent)
     }
 
     private fun handleAuthRedirect(intent: Intent?) {
         val url = intent?.dataString ?: return
         if (!AuthManager.isRedirect(url)) return
+        DiagnosticsLog.event("Auth redirect received")
         AuthManager.extractToken(url)?.let { token ->
             AuthManager.setToken(token)
             LibraryStore.syncSavedToAniList()
             pendingRoute = Routes.MORE
+            DiagnosticsLog.event("Auth redirect accepted")
         }
     }
 
     override fun onStop() {
         super.onStop()
+        DiagnosticsLog.event("MainActivity.onStop")
         PlaybackService.pauseActivePlayback()
     }
 
@@ -158,6 +170,7 @@ class MainActivity : ComponentActivity() {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         inPictureInPicture = isInPictureInPictureMode
+        DiagnosticsLog.event("PictureInPicture changed active=$isInPictureInPictureMode")
     }
 
 }
@@ -182,15 +195,24 @@ private fun MiruroRoot(
     val currentRoute = backStack?.destination?.route
     val showBottomBar = currentRoute in Routes.tabRoutes
 
+    LaunchedEffect(currentRoute) {
+        DiagnosticsLog.event("Nav route=${currentRoute ?: "none"}")
+    }
+
     LaunchedEffect(pendingRoute) {
         pendingRoute?.takeIf { it.isNotBlank() }?.let { route ->
+            DiagnosticsLog.event("Consuming pending route=$route")
             nav.navigate(route) { launchSingleTop = true }
             onRouteConsumed()
         }
     }
 
     val context = LocalContext.current
-    LaunchedEffect(Unit) { UpdateManager.autoCheckIfDue(context) }
+    LaunchedEffect(Unit) {
+        DiagnosticsLog.event("UpdateManager.autoCheckIfDue start")
+        UpdateManager.autoCheckIfDue(context)
+        DiagnosticsLog.event("UpdateManager.autoCheckIfDue complete")
+    }
 
     CompositionLocalProvider(LocalAppDeviceProfile provides deviceProfile) {
         NotificationPermissionEffect()

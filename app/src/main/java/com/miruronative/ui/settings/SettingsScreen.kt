@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -52,6 +53,7 @@ import com.miruronative.data.reminder.AutomaticReleaseManager
 import com.miruronative.data.reminder.ReleaseSyncScheduler
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.data.update.UpdateManager
+import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.ui.UiState
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
@@ -85,6 +87,7 @@ fun SettingsScreen(
     var pendingMalExport by remember { mutableStateOf<MalExportFile?>(null) }
     var malExportBusy by remember { mutableStateOf(false) }
     var malExportMessage by remember { mutableStateOf<String?>(null) }
+    var diagnosticsMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(token) { vm.loadIfLoggedIn() }
 
@@ -252,6 +255,28 @@ fun SettingsScreen(
             item { SectionDivider() }
 
             item { SettingsSectionTitle("App") }
+            item {
+                SettingsAction(
+                    title = "Share diagnostics",
+                    icon = { Icon(Icons.Default.Share, contentDescription = null) },
+                    enabled = true,
+                    onClick = {
+                        diagnosticsMessage = null
+                        DiagnosticsLog.share(context)
+                            .onFailure { diagnosticsMessage = it.message ?: "Couldn't share diagnostics" }
+                    },
+                )
+            }
+            diagnosticsMessage?.let { message ->
+                item {
+                    Text(
+                        message,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                }
+            }
             item {
                 SettingsAction(
                     title = when (updateState) {

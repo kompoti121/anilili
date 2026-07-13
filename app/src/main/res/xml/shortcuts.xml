@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="share_diagnostics"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/diagnostics_shortcut_short"
+        android:shortcutLongLabel="@string/diagnostics_shortcut_long"
+        android:shortcutDisabledMessage="@string/diagnostics_shortcut_disabled">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.miruronative"
+            android:targetClass="com.miruronative.diagnostics.ShareDiagnosticsActivity" />
+    </shortcut>
+</shortcuts>

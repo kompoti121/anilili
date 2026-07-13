@@ -6,9 +6,11 @@ import android.os.Looper
 import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.miruronative.diagnostics.DiagnosticsLog
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
@@ -38,6 +40,7 @@ object PipeBridge {
     /** Called from the hosting Composable on the main thread with a freshly created WebView. */
     @SuppressLint("SetJavaScriptEnabled")
     fun attach(wv: WebView) {
+        DiagnosticsLog.event("PipeBridge.attach")
         webView = wv
         if (ready.isCompleted) ready = CompletableDeferred()
 
@@ -59,11 +62,19 @@ object PipeBridge {
                 val host = url.host.orEmpty().lowercase()
                 val allowed = url.scheme == "https" &&
                     (host == "miruro.to" || host.endsWith(".miruro.to"))
-                if (!allowed) Log.d(TAG, "blocked nav: $url")
+                if (!allowed) {
+                    DiagnosticsLog.event("PipeBridge blocked nav: $url")
+                    Log.d(TAG, "blocked nav: $url")
+                }
                 return !allowed
             }
 
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                DiagnosticsLog.event("PipeBridge page started: ${url ?: "unknown"}")
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
+                DiagnosticsLog.event("PipeBridge page finished: ${url ?: "unknown"} title=${view?.title ?: "none"}")
                 Log.d(TAG, "onPageFinished: $url  title=${view?.title}")
                 // Give Cloudflare a moment to settle, then allow fetches.
                 if (url != null && url.startsWith(ORIGIN)) {
@@ -76,17 +87,34 @@ object PipeBridge {
                 request: WebResourceRequest?,
                 error: android.webkit.WebResourceError?,
             ) {
+                if (request?.isForMainFrame == true) {
+                    DiagnosticsLog.event(
+                        "PipeBridge main-frame error code=${error?.errorCode} " +
+                            "description=${error?.description}",
+                    )
+                }
                 // Main-frame load failed (offline, DNS, site down): unblock waiters so pipe
                 // requests fail fast to the cache/error path instead of stalling 25 s each.
                 if (request?.isForMainFrame == true && !ready.isCompleted) ready.complete(false)
             }
+
+            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                DiagnosticsLog.event(
+                    "PipeBridge render process gone didCrash=${detail?.didCrash()} " +
+                        "priority=${detail?.rendererPriorityAtExit()}",
+                )
+                view?.let(::detach)
+                return true
+            }
         }
+        DiagnosticsLog.event("PipeBridge load origin=$ORIGIN")
         wv.loadUrl("$ORIGIN/")
     }
 
     /** Releases the attached browser and fails requests that can no longer complete. */
     fun detach(wv: WebView) {
         if (webView !== wv) return
+        DiagnosticsLog.event("PipeBridge.detach")
         webView = null
         ready = CompletableDeferred()
         pending.entries.toList().forEach { (id, request) ->
@@ -144,6 +172,7 @@ object PipeBridge {
         val result = withTimeoutOrNull(timeoutMs) { deferred.await() }
             ?: run {
                 pending.remove(id)
+                DiagnosticsLog.event("PipeBridge fetch timeout e.len=${e.length}")
                 """{"ok":false,"status":-1,"error":"timeout"}"""
             }
         Log.d(TAG, "fetch(e.len=${e.length}) -> ${result.take(180)}")

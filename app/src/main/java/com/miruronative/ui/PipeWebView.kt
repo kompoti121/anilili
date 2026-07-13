@@ -9,6 +9,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.size
 import com.miruronative.data.remote.PipeBridge
 import com.miruronative.diagnostics.CrashReporter
+import com.miruronative.diagnostics.DiagnosticsLog
 
 /**
  * Hidden 1dp WebView that hosts the Cloudflare-cleared miruro.to session. It stays attached to the
@@ -23,11 +24,13 @@ fun PipeWebView() {
     AndroidView(
         factory = { ctx ->
             try {
+                DiagnosticsLog.event("PipeWebView factory create WebView start")
                 WebView(ctx).also {
                     it.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
                     it.isFocusable = false
                     it.isClickable = false
                     PipeBridge.attach(it)
+                    DiagnosticsLog.event("PipeWebView factory create WebView complete")
                 }
             } catch (e: Throwable) {
                 CrashReporter.logNonFatal("System WebView unavailable; pipe providers disabled", e)
@@ -36,6 +39,7 @@ fun PipeWebView() {
         },
         onRelease = { view ->
             val web = view as? WebView ?: return@AndroidView
+            DiagnosticsLog.event("PipeWebView release")
             PipeBridge.detach(web)
             web.stopLoading()
             web.webChromeClient = null
