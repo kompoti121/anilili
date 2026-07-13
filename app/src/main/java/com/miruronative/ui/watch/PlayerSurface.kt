@@ -195,8 +195,19 @@ fun PlayerSurface(
     var controllerVisible by remember { mutableStateOf(false) }
     val currentOnNextEpisode by rememberUpdatedState(onNextEpisode)
     val currentOnPreviousEpisode by rememberUpdatedState(onPreviousEpisode)
-    var episodeButtons by remember {
-        mutableStateOf<Pair<android.widget.ImageButton, android.widget.ImageButton>?>(null)
+    val currentHasNext by rememberUpdatedState(hasNextEpisode)
+    val currentHasPrevious by rememberUpdatedState(hasPreviousEpisode)
+
+    // Bridges the media session's next/previous commands (controller buttons, notification,
+    // hardware media keys) into the episode-resolution flow while this screen is visible.
+    DisposableEffect(Unit) {
+        PlaybackService.episodeNavigator = { direction ->
+            when {
+                direction > 0 && currentHasNext -> currentOnNextEpisode()
+                direction < 0 && currentHasPrevious -> currentOnPreviousEpisode?.invoke()
+            }
+        }
+        onDispose { PlaybackService.episodeNavigator = null }
     }
     var settingsExpanded by remember { mutableStateOf(false) }
     var seekFlash by remember { mutableIntStateOf(0) } // -10 / +10, 0 = hidden
@@ -256,8 +267,10 @@ fun PlayerSurface(
                     isFocusable = true
                     isFocusableInTouchMode = true
                     setShowSubtitleButton(true)
-                    setShowNextButton(false)
-                    setShowPreviousButton(false)
+                    // Enabled by the session's ForwardingPlayer, which maps next/previous
+                    // to the episode navigator (the local playlist stays single-item).
+                    setShowNextButton(true)
+                    setShowPreviousButton(true)
                     setShowFastForwardButton(true)
                     setShowRewindButton(true)
                     controllerShowTimeoutMs = if (device.isTv) 6_000 else 5_000
@@ -279,10 +292,6 @@ fun PlayerSurface(
                         setFullscreenButtonClickListener { onToggleFullscreen() }
                     }
                     bindUnifiedSettingsButton { settingsExpanded = true }
-                    episodeButtons = installEpisodeButtons(
-                        onPrevious = { currentOnPreviousEpisode?.invoke() },
-                        onNext = { currentOnNextEpisode() },
-                    )
                     if (device.isTv) post { requestFocus() }
                     playerView = this
                 }
@@ -290,13 +299,6 @@ fun PlayerSurface(
             update = {
                 it.player = controller
                 it.bindUnifiedSettingsButton { settingsExpanded = true }
-                episodeButtons?.let { (previous, next) ->
-                    val prevEnabled = hasPreviousEpisode && onPreviousEpisode != null
-                    previous.isEnabled = prevEnabled
-                    previous.alpha = if (prevEnabled) 1f else 0.35f
-                    next.isEnabled = hasNextEpisode
-                    next.alpha = if (hasNextEpisode) 1f else 0.35f
-                }
             },
             onRelease = {
                 it.player = null
@@ -386,45 +388,6 @@ fun PlayerSurface(
             }
         }
     }
-}
-
-/**
- * Injects episode prev/next into the controller's bottom button row. Media3's own
- * prev/next are playlist-based (a single media item disables them), and Compose overlay
- * buttons are unreachable by D-pad because focus stays inside PlayerView — so real View
- * buttons in the controller are the only variant that works for touch and TV alike.
- */
-@OptIn(UnstableApi::class)
-private fun PlayerView.installEpisodeButtons(
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-): Pair<android.widget.ImageButton, android.widget.ImageButton>? {
-    val row = findViewById<android.view.ViewGroup>(androidx.media3.ui.R.id.exo_basic_controls)
-        ?: return null
-    fun button(drawable: Int, description: String, onClick: () -> Unit) =
-        android.widget.ImageButton(
-            context,
-            null,
-            0,
-            androidx.media3.ui.R.style.ExoStyledControls_Button_Bottom,
-        ).apply {
-            setImageResource(drawable)
-            contentDescription = description
-            setOnClickListener { onClick() }
-        }
-    val previous = button(
-        androidx.media3.ui.R.drawable.exo_styled_controls_previous,
-        "Previous episode",
-        onPrevious,
-    )
-    val next = button(
-        androidx.media3.ui.R.drawable.exo_styled_controls_next,
-        "Next episode",
-        onNext,
-    )
-    row.addView(previous, 0)
-    row.addView(next, 1)
-    return previous to next
 }
 
 /** Unified settings opened from Media3's built-in settings button. */

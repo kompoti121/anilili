@@ -9,6 +9,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
@@ -78,7 +79,49 @@ class PlaybackService : MediaSessionService() {
             }
         activePlayer = player
 
-        session = MediaSession.Builder(this, player)
+        // The playlist holds one media item at a time (episodes resolve lazily, per provider),
+        // but the session still advertises next/previous by forwarding them to the app's
+        // episode navigator. That lights up Media3's built-in prev/next buttons and makes the
+        // media notification and hardware/Bluetooth media keys switch episodes.
+        val episodeAwarePlayer = object : ForwardingPlayer(player) {
+            override fun getAvailableCommands(): Player.Commands =
+                super.getAvailableCommands().buildUpon()
+                    .addAll(
+                        Player.COMMAND_SEEK_TO_NEXT,
+                        Player.COMMAND_SEEK_TO_PREVIOUS,
+                        Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                        Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                    )
+                    .build()
+
+            override fun isCommandAvailable(command: Int): Boolean =
+                command == Player.COMMAND_SEEK_TO_NEXT ||
+                    command == Player.COMMAND_SEEK_TO_PREVIOUS ||
+                    command == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ||
+                    command == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM ||
+                    super.isCommandAvailable(command)
+
+            override fun hasNextMediaItem(): Boolean = episodeNavigator != null
+            override fun hasPreviousMediaItem(): Boolean = episodeNavigator != null
+
+            override fun seekToNext() {
+                episodeNavigator?.invoke(1) ?: super.seekToNext()
+            }
+
+            override fun seekToNextMediaItem() {
+                episodeNavigator?.invoke(1) ?: super.seekToNextMediaItem()
+            }
+
+            override fun seekToPrevious() {
+                episodeNavigator?.invoke(-1) ?: super.seekToPrevious()
+            }
+
+            override fun seekToPreviousMediaItem() {
+                episodeNavigator?.invoke(-1) ?: super.seekToPreviousMediaItem()
+            }
+        }
+
+        session = MediaSession.Builder(this, episodeAwarePlayer)
             .setSessionActivity(sessionActivity(null))
             .build()
         session.setMediaButtonPreferences(
@@ -104,6 +147,7 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         activeHttpFactory = null
         activePlayer = null
+        episodeNavigator = null
         PlaybackStatus.update(false)
         if (::session.isInitialized) session.release()
         if (::player.isInitialized) player.release()
@@ -133,6 +177,14 @@ class PlaybackService : MediaSessionService() {
         private var activeHttpFactory: DefaultHttpDataSource.Factory? = null
         @Volatile
         private var activePlayer: ExoPlayer? = null
+
+        /**
+         * Set by the watch screen while it is visible: receives +1/-1 and resolves the
+         * next/previous episode through the normal source-resolution flow. Invoked on the
+         * main thread (session commands arrive on the application looper).
+         */
+        @Volatile
+        var episodeNavigator: ((direction: Int) -> Unit)? = null
 
         /** Used when switching explicitly from native playback to a provider WebView. */
         fun stopActivePlayback() {
