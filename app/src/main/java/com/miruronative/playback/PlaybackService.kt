@@ -5,12 +5,14 @@ import android.content.Intent
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.DeviceInfo
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.cast.CastPlayer
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
-import androidx.media3.common.ForwardingPlayer
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
@@ -33,12 +35,13 @@ object PlaybackStatus {
 }
 
 /**
- * Owns the single ExoPlayer instance so playback survives activity backgrounding and exposes
- * Android notification, lock-screen, headset, and Bluetooth controls through a MediaSession.
+ * Owns the app playback player so playback survives activity backgrounding and exposes Android
+ * notification, lock-screen, headset, Bluetooth, and Cast controls through a MediaSession.
  */
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
     private lateinit var player: ExoPlayer
+    private lateinit var castPlayer: CastPlayer
     private lateinit var session: MediaSession
     private lateinit var httpFactory: DefaultHttpDataSource.Factory
 
@@ -68,6 +71,11 @@ class PlaybackService : MediaSessionService() {
                     true,
                 )
                 setHandleAudioBecomingNoisy(true)
+            }
+        castPlayer = CastPlayer.Builder(this)
+            .setLocalPlayer(player)
+            .build()
+            .apply {
                 addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
                         DiagnosticsLog.event("PlaybackService player isPlaying=$isPlaying")
@@ -76,6 +84,18 @@ class PlaybackService : MediaSessionService() {
 
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         DiagnosticsLog.event("PlaybackService player state=${playbackState.stateName()}")
+                    }
+
+                    override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
+                        val route = if (deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) {
+                            "remote"
+                        } else {
+                            "local"
+                        }
+                        DiagnosticsLog.event(
+                            "PlaybackService route=$route " +
+                                "routingController=${deviceInfo.routingControllerId ?: "none"}",
+                        )
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
@@ -93,13 +113,13 @@ class PlaybackService : MediaSessionService() {
                     }
                 })
             }
-        activePlayer = player
+        activePlayer = castPlayer
 
         // The playlist holds one media item at a time (episodes resolve lazily, per provider),
         // but the session still advertises next/previous by forwarding them to the app's
         // episode navigator. That lights up Media3's built-in prev/next buttons and makes the
         // media notification and hardware/Bluetooth media keys switch episodes.
-        val episodeAwarePlayer = object : ForwardingPlayer(player) {
+        val episodeAwarePlayer = object : ForwardingPlayer(castPlayer) {
             override fun getAvailableCommands(): Player.Commands =
                 super.getAvailableCommands().buildUpon()
                     .addAll(
@@ -161,8 +181,8 @@ class PlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        DiagnosticsLog.event("PlaybackService.onTaskRemoved playing=${if (::player.isInitialized) player.playWhenReady else false}")
-        if (!::player.isInitialized || !player.playWhenReady || player.mediaItemCount == 0) stopSelf()
+        DiagnosticsLog.event("PlaybackService.onTaskRemoved playing=${if (::castPlayer.isInitialized) castPlayer.playWhenReady else false}")
+        if (!::castPlayer.isInitialized || !castPlayer.playWhenReady || castPlayer.mediaItemCount == 0) stopSelf()
     }
 
     override fun onDestroy() {
@@ -172,7 +192,11 @@ class PlaybackService : MediaSessionService() {
         episodeNavigator = null
         PlaybackStatus.update(false)
         if (::session.isInitialized) session.release()
-        if (::player.isInitialized) player.release()
+        if (::castPlayer.isInitialized) {
+            castPlayer.release()
+        } else if (::player.isInitialized) {
+            player.release()
+        }
         super.onDestroy()
     }
 
@@ -198,7 +222,7 @@ class PlaybackService : MediaSessionService() {
         @Volatile
         private var activeHttpFactory: DefaultHttpDataSource.Factory? = null
         @Volatile
-        private var activePlayer: ExoPlayer? = null
+        private var activePlayer: Player? = null
 
         /**
          * Set by the watch screen while it is visible: receives +1/-1 and resolves the
@@ -220,7 +244,12 @@ class PlaybackService : MediaSessionService() {
         /** Pause playback when the app is backgrounded while keeping the current media loaded. */
         fun pauseActivePlayback() {
             DiagnosticsLog.event("PlaybackService.pauseActivePlayback")
-            activePlayer?.pause()
+            val active = activePlayer ?: return
+            if (active.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) {
+                DiagnosticsLog.event("PlaybackService.pauseActivePlayback skipped remote route")
+                return
+            }
+            active.pause()
         }
 
         /** Applies per-provider headers before Media3 creates manifest and segment data sources. */

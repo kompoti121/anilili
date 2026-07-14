@@ -25,6 +25,10 @@
         android:theme="@style/Theme.MiruroNative"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
 
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="androidx.media3.cast.DefaultCastOptionsProvider" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -62,6 +66,8 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+
+        <receiver android:name="androidx.mediarouter.media.MediaTransferReceiver" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

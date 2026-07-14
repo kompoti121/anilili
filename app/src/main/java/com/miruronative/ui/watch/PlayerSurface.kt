@@ -55,6 +55,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.cast.MediaRouteButtonViewProvider
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -228,6 +229,7 @@ fun PlayerSurface(
     }
 
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
+    val mediaRouteButtonViewProvider = remember { MediaRouteButtonViewProvider() }
     var controllerVisible by remember { mutableStateOf(false) }
     val currentOnNextEpisode by rememberUpdatedState(onNextEpisode)
     val currentOnPreviousEpisode by rememberUpdatedState(onPreviousEpisode)
@@ -304,6 +306,7 @@ fun PlayerSurface(
                 DiagnosticsLog.event("PlayerSurface AndroidView factory create PlayerView")
                 PlayerView(ctx).apply {
                     player = controller
+                    setMediaRouteButtonViewProvider(mediaRouteButtonViewProvider)
                     useController = true
                     keepScreenOn = true
                     isFocusable = true
@@ -340,6 +343,7 @@ fun PlayerSurface(
             },
             update = {
                 it.player = controller
+                it.setMediaRouteButtonViewProvider(mediaRouteButtonViewProvider)
                 it.bindUnifiedSettingsButton { settingsExpanded = true }
                 DiagnosticsLog.event(
                     "PlayerSurface AndroidView update controller=${controller != null} " +
