@@ -66,6 +66,7 @@ import com.miruronative.data.library.WatchlistEntry
 import com.miruronative.data.model.MediaListEntry
 import com.miruronative.ui.UiState
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
+import com.miruronative.ui.adaptive.TvDeferredTextField
 import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.components.PullRefreshContainer
 import com.miruronative.ui.components.RatingBadge
@@ -424,18 +425,20 @@ private fun LibraryFilters(
                     modifier = Modifier.weight(1f),
                 )
             }
-            OutlinedTextField(
-                value = titleFilter,
-                onValueChange = onTitleFilterChange,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Filter by title") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                trailingIcon = if (titleFilter.isNotEmpty()) {
-                    { IconButton(onClick = { onTitleFilterChange("") }) { Icon(Icons.Default.Close, contentDescription = "Clear title filter") } }
-                } else null,
-                shape = RoundedCornerShape(9.dp),
-                singleLine = true,
-            )
+            TvDeferredTextField(Modifier.fillMaxWidth()) { fieldModifier ->
+                OutlinedTextField(
+                    value = titleFilter,
+                    onValueChange = onTitleFilterChange,
+                    modifier = fieldModifier.fillMaxWidth(),
+                    placeholder = { Text("Filter by title") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = if (titleFilter.isNotEmpty()) {
+                        { IconButton(onClick = { onTitleFilterChange("") }) { Icon(Icons.Default.Close, contentDescription = "Clear title filter") } }
+                    } else null,
+                    shape = RoundedCornerShape(9.dp),
+                    singleLine = true,
+                )
+            }
             Text(
                 "$resultCount anime",
                 style = MaterialTheme.typography.labelMedium,

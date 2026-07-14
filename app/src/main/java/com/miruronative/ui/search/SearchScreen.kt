@@ -53,8 +53,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -73,6 +71,7 @@ import com.miruronative.data.model.DiscoverOptions
 import com.miruronative.data.model.Media
 import com.miruronative.ui.UiState
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
+import com.miruronative.ui.adaptive.TvDeferredTextField
 import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.components.AnimeCard
 import com.miruronative.ui.components.ErrorBox
@@ -92,7 +91,6 @@ fun SearchScreen(
     val device = LocalAppDeviceProfile.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
-    val focusRequester = remember { FocusRequester() }
     var showFilters by remember { mutableStateOf(false) }
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -123,48 +121,48 @@ fun SearchScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedTextField(
-                        value = vm.query,
-                        onValueChange = vm::onQueryChange,
-                        modifier = Modifier
-                            .weight(1f)
-                            .widthIn(min = 0.dp, max = 720.dp)
-                            .focusRequester(focusRequester)
-                            // TV: the text field consumes D-pad Down for cursor handling, so
-                            // focus can never escape into the results. Hand it off manually.
-                            .onPreviewKeyEvent { event ->
-                                if (device.isTv &&
-                                    event.type == KeyEventType.KeyDown &&
-                                    event.key == Key.DirectionDown
-                                ) {
-                                    keyboard?.hide()
-                                    focusManager.moveFocus(FocusDirection.Down)
-                                    true
-                                } else {
-                                    false
+                    TvDeferredTextField(Modifier.weight(1f).widthIn(min = 0.dp, max = 720.dp)) { fieldModifier ->
+                        OutlinedTextField(
+                            value = vm.query,
+                            onValueChange = vm::onQueryChange,
+                            modifier = fieldModifier
+                                .fillMaxWidth()
+                                // TV: the text field consumes D-pad Down for cursor handling, so
+                                // focus can never escape into the results. Hand it off manually.
+                                .onPreviewKeyEvent { event ->
+                                    if (device.isTv &&
+                                        event.type == KeyEventType.KeyDown &&
+                                        event.key == Key.DirectionDown
+                                    ) {
+                                        keyboard?.hide()
+                                        focusManager.moveFocus(FocusDirection.Down)
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                },
+                            placeholder = { Text("Search anime…") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            trailingIcon = {
+                                if (vm.query.isNotEmpty()) {
+                                    IconButton(onClick = { vm.onQueryChange("") }, modifier = Modifier.size(40.dp)) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear search")
+                                    }
                                 }
                             },
-                        placeholder = { Text("Search anime…") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                        trailingIcon = {
-                            if (vm.query.isNotEmpty()) {
-                                IconButton(onClick = { vm.onQueryChange("") }, modifier = Modifier.size(40.dp)) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear search")
-                                }
-                            }
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = {
-                            keyboard?.hide()
-                            focusManager.moveFocus(FocusDirection.Down)
-                        }),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surface,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                        ),
-                    )
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                keyboard?.hide()
+                                focusManager.moveFocus(FocusDirection.Down)
+                            }),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            ),
+                        )
+                    }
                     Button(
                         onClick = { showFilters = true },
                         contentPadding = PaddingValues(horizontal = 13.dp),
@@ -319,18 +317,20 @@ private fun FilterSheet(
             item { FilterSection("Sort by") { ChoiceFlow(SearchViewModel.SORTS, filters.sort, vm::setSort) } }
             item {
                 FilterSection("Release year") {
-                    OutlinedTextField(
-                        value = filters.year?.toString().orEmpty(),
-                        onValueChange = { value ->
-                            val digits = value.filter(Char::isDigit).take(4)
-                            vm.setYear(digits.toIntOrNull()?.takeIf { it in 1900..2100 })
-                        },
-                        modifier = Modifier.fillMaxWidth().tvEscapeDown(),
-                        placeholder = { Text("Any year (for example 2024)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                    )
+                    TvDeferredTextField(Modifier.fillMaxWidth()) { fieldModifier ->
+                        OutlinedTextField(
+                            value = filters.year?.toString().orEmpty(),
+                            onValueChange = { value ->
+                                val digits = value.filter(Char::isDigit).take(4)
+                                vm.setYear(digits.toIntOrNull()?.takeIf { it in 1900..2100 })
+                            },
+                            modifier = fieldModifier.fillMaxWidth().tvEscapeDown(),
+                            placeholder = { Text("Any year (for example 2024)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                        )
+                    }
                 }
             }
             item { FilterSection("Status") { NullableChoiceFlow(SearchViewModel.STATUSES, filters.status, vm::setStatus) } }
@@ -365,15 +365,17 @@ private fun FilterSheet(
             if (options.tags.isNotEmpty()) {
                 item {
                     FilterSection("Tags") {
-                        OutlinedTextField(
-                            value = tagSearch,
-                            onValueChange = { tagSearch = it },
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).tvEscapeDown(),
-                            placeholder = { Text("Find a tag") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(10.dp),
-                        )
+                        TvDeferredTextField(Modifier.fillMaxWidth().padding(bottom = 8.dp)) { fieldModifier ->
+                            OutlinedTextField(
+                                value = tagSearch,
+                                onValueChange = { tagSearch = it },
+                                modifier = fieldModifier.fillMaxWidth().tvEscapeDown(),
+                                placeholder = { Text("Find a tag") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(10.dp),
+                            )
+                        }
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             visibleTags.forEach { tag ->
                                 AssistChip(
