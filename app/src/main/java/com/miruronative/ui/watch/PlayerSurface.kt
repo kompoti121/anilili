@@ -54,8 +54,23 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import android.content.Context
+import android.view.ContextThemeWrapper
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import androidx.media3.common.ViewProvider
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.cast.MediaRouteButtonViewProvider
+import androidx.media3.cast.MediaRouteButtonFactory
+import androidx.mediarouter.app.MediaRouteButton
+import androidx.mediarouter.app.MediaRouteChooserDialog
+import androidx.mediarouter.app.MediaRouteChooserDialogFragment
+import androidx.mediarouter.app.MediaRouteControllerDialog
+import androidx.mediarouter.app.MediaRouteControllerDialogFragment
+import androidx.mediarouter.app.MediaRouteDialogFactory
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.MoreExecutors
+import com.miruronative.R
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -72,6 +87,56 @@ import com.miruronative.ui.nav.Routes
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
+
+/**
+ * Same as media3's MediaRouteButtonViewProvider, but inflates the MediaRouteButton with an
+ * AppCompat-derived theme. The activity keeps its framework theme, and MediaRouteButton (and the
+ * route chooser/controller dialogs it opens) crash with "background can not be translucent: #0"
+ * without AppCompat theme attributes — so both the button and its dialogs get a wrapped context.
+ */
+@UnstableApi
+private class ThemedMediaRouteButtonViewProvider : ViewProvider {
+    override fun getView(parent: ViewGroup): ListenableFuture<View> {
+        val themedContext = ContextThemeWrapper(parent.context, R.style.Theme_MiruroNative_MediaRouter)
+        val button = LayoutInflater.from(themedContext)
+            .inflate(androidx.media3.cast.R.layout.media_route_button_view, parent, false) as MediaRouteButton
+        button.setDialogFactory(ThemedMediaRouteDialogFactory())
+        return Futures.transform(
+            MediaRouteButtonFactory.setUpMediaRouteButton(parent.context, button),
+            { button as View },
+            MoreExecutors.directExecutor(),
+        )
+    }
+}
+
+/**
+ * The route chooser/controller dialog fragments create their dialogs from the hosting activity's
+ * context; wrap it with the AppCompat-derived theme the same way as the button. Named (non-private)
+ * fragment classes so the FragmentManager can re-instantiate them after configuration changes.
+ */
+internal class ThemedMediaRouteChooserDialogFragment : MediaRouteChooserDialogFragment() {
+    override fun onCreateChooserDialog(context: Context, savedInstanceState: Bundle?): MediaRouteChooserDialog =
+        super.onCreateChooserDialog(
+            ContextThemeWrapper(context, R.style.Theme_MiruroNative_MediaRouter),
+            savedInstanceState,
+        )
+}
+
+internal class ThemedMediaRouteControllerDialogFragment : MediaRouteControllerDialogFragment() {
+    override fun onCreateControllerDialog(context: Context, savedInstanceState: Bundle?): MediaRouteControllerDialog =
+        super.onCreateControllerDialog(
+            ContextThemeWrapper(context, R.style.Theme_MiruroNative_MediaRouter),
+            savedInstanceState,
+        )
+}
+
+private class ThemedMediaRouteDialogFactory : MediaRouteDialogFactory() {
+    override fun onCreateChooserDialogFragment(): MediaRouteChooserDialogFragment =
+        ThemedMediaRouteChooserDialogFragment()
+
+    override fun onCreateControllerDialogFragment(): MediaRouteControllerDialogFragment =
+        ThemedMediaRouteControllerDialogFragment()
+}
 
 /** Media3 player surface backed by [PlaybackService] for PiP and system media controls. */
 @OptIn(UnstableApi::class)
@@ -241,7 +306,7 @@ fun PlayerSurface(
     }
 
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
-    val mediaRouteButtonViewProvider = remember { MediaRouteButtonViewProvider() }
+    val mediaRouteButtonViewProvider = remember { ThemedMediaRouteButtonViewProvider() }
     var controllerVisible by remember { mutableStateOf(false) }
     val currentOnNextEpisode by rememberUpdatedState(onNextEpisode)
     val currentOnPreviousEpisode by rememberUpdatedState(onPreviousEpisode)
@@ -355,7 +420,9 @@ fun PlayerSurface(
             },
             update = {
                 it.player = controller
-                it.setMediaRouteButtonViewProvider(mediaRouteButtonViewProvider)
+                // Deliberately NOT re-setting the media route button provider here: every
+                // setMediaRouteButtonViewProvider call inflates a fresh button, so repeated
+                // update passes stack duplicate cast icons. The factory sets it once.
                 it.bindUnifiedSettingsButton { settingsExpanded = true }
                 DiagnosticsLog.event(
                     "PlayerSurface AndroidView update controller=${controller != null} " +

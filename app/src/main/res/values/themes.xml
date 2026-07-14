@@ -1,10 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Base window theme used before Compose takes over. Edge-to-edge, dark by default. -->
+    <!-- Base window theme used before Compose takes over. Edge-to-edge, dark by default.
+         Kept as a framework theme; Cast UI (button + route dialogs) gets its required
+         AppCompat attributes from Theme.MiruroNative.MediaRouter via ContextThemeWrapper. -->
     <style name="Theme.MiruroNative" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@color/miruro_bg</item>
         <item name="android:navigationBarColor">@color/miruro_bg</item>
         <item name="android:windowBackground">@color/miruro_bg</item>
         <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!-- AppCompat-derived theme used only as a ContextThemeWrapper for the Cast
+         MediaRouteButton (and the chooser dialog it opens). Inflating MediaRouteButton
+         with a non-AppCompat theme crashes: "background can not be translucent: #0". -->
+    <style name="Theme.MiruroNative.MediaRouter" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/miruro_bg</item>
     </style>
 </resources>

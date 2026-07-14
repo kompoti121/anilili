@@ -99,6 +99,7 @@ dependencies {
     implementation(libs.androidx.media3.datasource)
     implementation(libs.androidx.media3.database)
     implementation(libs.androidx.media3.cast)
+    implementation(libs.androidx.appcompat)
     implementation(libs.androidx.fragment.ktx)
 
     implementation(libs.okhttp)
