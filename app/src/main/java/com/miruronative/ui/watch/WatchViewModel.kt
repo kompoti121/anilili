@@ -19,8 +19,13 @@ import com.miruronative.ui.UiState
 import com.miruronative.ui.rethrowIfCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+
+/** How long a ready stream waits on the AniSkip lookup before starting without markers. */
+private const val ANISKIP_WAIT_MS = 2_500L
 
 data class WatchData(
     val episodes: List<EpisodeItem>,
@@ -112,10 +117,15 @@ class WatchViewModel : ViewModel() {
         }
     }
 
-    /** Navigation spine: the chosen provider's episode list, else whichever has the most episodes. */
+    /**
+     * Navigation spine: the longest provider episode list, so Next never dead-ends just because
+     * the launched provider's list lags behind the others. Ties keep the chosen provider; source
+     * resolution still tries the preferred provider first and falls back per episode.
+     */
     private fun pickSpine(merged: EpisodesResult): List<EpisodeItem> {
-        merged.provider(preferred)?.episodes(category)?.takeIf { it.isNotEmpty() }?.let { return it }
-        return merged.providers.map { it.episodes(category) }.maxByOrNull { it.size } ?: emptyList()
+        val preferredList = merged.provider(preferred)?.episodes(category).orEmpty()
+        val longest = merged.providers.map { it.episodes(category) }.maxByOrNull { it.size }.orEmpty()
+        return if (preferredList.size >= longest.size) preferredList else longest
     }
 
     private suspend fun resolveAndPlay(number: Double) {
@@ -124,6 +134,11 @@ class WatchViewModel : ViewModel() {
                 "category=${category.api} excluded=${failedProviders.joinToString()}",
         )
         lastRequestedNumber = number
+        // Fetched alongside source resolution: fills intro/outro markers for providers that
+        // don't ship their own, so auto-skip keeps working after a provider fallback.
+        val aniSkipFallback = viewModelScope.async {
+            runCatching { repo.skipTimes(anilistId, number) }.getOrNull()
+        }
         val previous = (_state.value as? UiState.Success)?.data
         _state.value = previous?.let { UiState.Success(it.copy(isResolving = true, notice = null)) }
             ?: UiState.Loading
@@ -135,6 +150,7 @@ class WatchViewModel : ViewModel() {
             excludedProviders = failedProviders,
         )
         if (resolved == null) {
+            aniSkipFallback.cancel()
             val message = "No playable source for episode ${fmt(number)} on any server"
             DiagnosticsLog.event("Watch resolve no source id=$anilistId episode=${fmt(number)}")
             _state.value = previous?.let {
@@ -143,6 +159,13 @@ class WatchViewModel : ViewModel() {
             return
         }
         preferred = resolved.provider // stick with whatever actually served the stream
+        val sources = if (resolved.sources.skip == null) {
+            val fallbackSkip = withTimeoutOrNull(ANISKIP_WAIT_MS) { aniSkipFallback.await() }
+            fallbackSkip?.let { resolved.sources.copy(skip = it) } ?: resolved.sources
+        } else {
+            aniSkipFallback.cancel()
+            resolved.sources
+        }
         val index = spine.indexOfFirst { it.number == number }.coerceAtLeast(0)
         val resume = LibraryStore.historyFor(anilistId)?.takeIf { it.episodeNumber == number }?.positionMs ?: 0L
         val chosen = pickStream(resolved.sources)
@@ -160,7 +183,7 @@ class WatchViewModel : ViewModel() {
                 category = category,
                 sourceOptions = sourceOptions(number),
                 anilistId = anilistId,
-                sources = resolved.sources,
+                sources = sources,
                 chosenStream = chosen,
                 seriesTitle = seriesTitle,
                 artworkUrl = artworkUrl,

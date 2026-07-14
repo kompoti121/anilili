@@ -10,7 +10,9 @@ import com.miruronative.data.model.MediaPage
 import com.miruronative.data.model.SourcesResult
 import com.miruronative.data.cache.AppCache
 import com.miruronative.data.model.DiscoverOptions
+import com.miruronative.data.model.SkipTimes
 import com.miruronative.data.remote.AniListClient
+import com.miruronative.data.remote.AniSkipClient
 import com.miruronative.data.remote.AnivexaClient
 import com.miruronative.data.remote.JikanClient
 import com.miruronative.data.remote.PipeClient
@@ -33,6 +35,7 @@ class MiruroRepository(
     private val pipe: PipeClient,
     private val anivexa: AnivexaClient,
     private val jikan: JikanClient,
+    private val aniSkip: AniSkipClient,
     private val cache: AppCache,
 ) {
     /** User preference: keep hentai out of every browsing surface. */
@@ -102,6 +105,17 @@ class MiruroRepository(
             serializer = SetSerializer(Int.serializer()),
             ttlMs = OPTIONS_TTL,
         ) { withContext(Dispatchers.IO) { jikan.fillerEpisodes(malId) } }
+    }
+
+    /** Community intro/outro markers via AniSkip; cached, null when unknown or on failure. */
+    suspend fun skipTimes(anilistId: Int, episode: Double): SkipTimes? {
+        if (episode % 1.0 != 0.0 || episode < 1) return null
+        val malId = animeInfo(anilistId)?.idMal?.takeIf { it > 0 } ?: return null
+        return cache.getOrFetch(
+            key = "aniskip:$malId:${episode.toInt()}",
+            serializer = SkipTimes.serializer().nullable,
+            ttlMs = OPTIONS_TTL,
+        ) { withContext(Dispatchers.IO) { runCatching { aniSkip.skipTimes(malId, episode.toInt()) }.getOrNull() } }
     }
 
     suspend fun animeInfo(id: Int, force: Boolean = false): Media? = cache.getOrFetch(

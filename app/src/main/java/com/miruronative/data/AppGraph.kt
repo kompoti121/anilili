@@ -3,6 +3,7 @@ package com.miruronative.data
 import android.content.Context
 import com.miruronative.data.cache.AppCache
 import com.miruronative.data.remote.AniListClient
+import com.miruronative.data.remote.AniSkipClient
 import com.miruronative.data.remote.AnivexaClient
 import com.miruronative.data.remote.JikanClient
 import com.miruronative.data.remote.PipeClient
@@ -46,6 +47,7 @@ object AppGraph {
             pipe = PipeClient(json),
             anivexa = AnivexaClient(httpClient, json, aniList),
             jikan = JikanClient(httpClient, json),
+            aniSkip = AniSkipClient(httpClient, json),
             cache = AppCache(context, json),
         )
     }

@@ -63,6 +63,7 @@ data class StreamItem(
 
 data class SubtitleItem(val url: String, val label: String, val language: String)
 
+@Serializable
 data class SkipTimes(
     val introStart: Double?,
     val introEnd: Double?,
