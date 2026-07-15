@@ -6,10 +6,12 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import com.miruronative.diagnostics.CrashReporter
 import java.io.IOException
+import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,6 +20,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+enum class MenuLanguage(val storedValue: String) {
+    SYSTEM("system"),
+    ENGLISH("en"),
+    SPANISH("es");
+
+    fun usesSpanish(systemLanguage: String = Locale.getDefault().language): Boolean =
+        this == SPANISH || (this == SYSTEM && systemLanguage.equals("es", ignoreCase = true))
+
+    companion object {
+        fun fromStored(value: String?): MenuLanguage = entries.firstOrNull { it.storedValue == value } ?: SYSTEM
+    }
+}
 
 /** Transactional DataStore preferences shared by playback and the Library settings UI. */
 object SettingsStore {
@@ -48,6 +63,9 @@ object SettingsStore {
     private val _subtitlesWithDub = MutableStateFlow(false)
     val subtitlesWithDub = _subtitlesWithDub.asStateFlow()
 
+    private val _menuLanguage = MutableStateFlow(MenuLanguage.SYSTEM)
+    val menuLanguage = _menuLanguage.asStateFlow()
+
     fun init(context: Context) {
         val app = context.applicationContext
         store = PreferenceDataStoreFactory.create(
@@ -75,6 +93,10 @@ object SettingsStore {
     fun setAutoSkipIntroOutro(value: Boolean) = save(AUTO_SKIP_INTRO_OUTRO, value, _autoSkipIntroOutro)
     fun setHideAdultContent(value: Boolean) = save(HIDE_ADULT_CONTENT, value, _hideAdultContent)
     fun setSubtitlesWithDub(value: Boolean) = save(SUBTITLES_WITH_DUB, value, _subtitlesWithDub)
+    fun setMenuLanguage(value: MenuLanguage) {
+        _menuLanguage.value = value
+        scope.launch { store.edit { it[MENU_LANGUAGE] = value.storedValue } }
+    }
 
     private fun save(key: Preferences.Key<Boolean>, value: Boolean, state: MutableStateFlow<Boolean>) {
         state.value = value
@@ -90,6 +112,7 @@ object SettingsStore {
         _autoSkipIntroOutro.value = prefs[AUTO_SKIP_INTRO_OUTRO] ?: false
         _hideAdultContent.value = prefs[HIDE_ADULT_CONTENT] ?: true
         _subtitlesWithDub.value = prefs[SUBTITLES_WITH_DUB] ?: false
+        _menuLanguage.value = MenuLanguage.fromStored(prefs[MENU_LANGUAGE])
     }
 
     private suspend fun migrateLegacyPreferences(context: Context) {
@@ -116,5 +139,6 @@ object SettingsStore {
     private val AUTO_SKIP_INTRO_OUTRO = booleanPreferencesKey("auto_skip_intro_outro")
     private val HIDE_ADULT_CONTENT = booleanPreferencesKey("hide_adult_content")
     private val SUBTITLES_WITH_DUB = booleanPreferencesKey("subtitles_with_dub")
+    private val MENU_LANGUAGE = stringPreferencesKey("menu_language")
     private val MIGRATED = booleanPreferencesKey("migrated_from_shared_preferences")
 }

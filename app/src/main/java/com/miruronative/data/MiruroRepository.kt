@@ -19,6 +19,7 @@ import com.miruronative.data.remote.PipeClient
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.diagnostics.DiagnosticsLog
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -139,11 +140,59 @@ class MiruroRepository(
     }
 
     suspend fun animeInfo(id: Int, force: Boolean = false): Media? = cache.getOrFetch(
-        key = "anime:v2:$id",
+        key = "anime:v3:$id",
         serializer = Media.serializer().nullable,
         ttlMs = INFO_TTL,
         forceRefresh = force,
     ) { aniList.animeInfo(id) }
+
+    /** Walks AniList's PREQUEL/SEQUEL chain so every season is reachable from one detail page. */
+    suspend fun animeSeries(root: Media): List<Media> = coroutineScope {
+        val found = linkedMapOf(root.id to root)
+        val expanded = mutableSetOf<Int>()
+        var frontier = listOf(root)
+        var depth = 0
+
+        while (frontier.isNotEmpty() && found.size < MAX_SERIES_ENTRIES && depth < MAX_SERIES_DEPTH) {
+            val batch = frontier
+                .filter { expanded.add(it.id) }
+                .take(MAX_SERIES_ENTRIES - found.size + 1)
+            if (batch.isEmpty()) break
+
+            val detailed = batch.map { media ->
+                async {
+                    if (media.id == root.id && media.relations.edges.isNotEmpty()) {
+                        media
+                    } else {
+                        runCatching { animeInfo(media.id) }.getOrNull() ?: media
+                    }
+                }
+            }.awaitAll()
+
+            val next = mutableListOf<Media>()
+            detailed.forEach { media ->
+                found[media.id] = media
+                media.seasonNeighbors().forEach { neighbor ->
+                    if (hideAdult && neighbor.isAdult) return@forEach
+                    if (neighbor.id !in found && found.size < MAX_SERIES_ENTRIES) {
+                        found[neighbor.id] = neighbor
+                    }
+                    if (neighbor.id !in expanded) next += neighbor
+                }
+            }
+            frontier = next.distinctBy(Media::id)
+            depth++
+        }
+
+        found.values.sortedWith(
+            compareBy<Media>(
+                { it.startDate?.year ?: it.seasonYear ?: Int.MAX_VALUE },
+                { it.startDate?.month ?: Int.MAX_VALUE },
+                { it.startDate?.day ?: Int.MAX_VALUE },
+                { it.id },
+            ),
+        )
+    }
 
     // ---- streaming (two backends, cached per source) ----
     /** Fast source — the Miruro pipe. */
@@ -294,6 +343,8 @@ class MiruroRepository(
     private fun Any?.orEmpty(): String = this?.toString() ?: ""
 
     private companion object {
+        const val MAX_SERIES_ENTRIES = 16
+        const val MAX_SERIES_DEPTH = 8
         const val SCHEDULE_TTL = 15L * 60 * 1000
         const val SEARCH_TTL = 30L * 60 * 1000
         const val AIRING_TTL = 30L * 60 * 1000
@@ -304,3 +355,10 @@ class MiruroRepository(
         const val OPTIONS_TTL = 7L * 24 * 60 * 60 * 1000
     }
 }
+
+internal fun Media.seasonNeighbors(): List<Media> = relations.edges
+    .asSequence()
+    .filter { it.relationType == "PREQUEL" || it.relationType == "SEQUEL" }
+    .mapNotNull { it.node }
+    .distinctBy(Media::id)
+    .toList()

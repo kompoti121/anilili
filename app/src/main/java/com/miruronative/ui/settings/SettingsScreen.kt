@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -52,6 +53,7 @@ import com.miruronative.data.library.MalExportFile
 import com.miruronative.data.reminder.AutomaticReleaseManager
 import com.miruronative.data.reminder.ReleaseSyncScheduler
 import com.miruronative.data.settings.SettingsStore
+import com.miruronative.data.settings.MenuLanguage
 import com.miruronative.data.update.UpdateManager
 import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.ui.UiState
@@ -81,6 +83,7 @@ fun SettingsScreen(
     val hideAdultContent by SettingsStore.hideAdultContent.collectAsState()
     val subtitlesWithDub by SettingsStore.subtitlesWithDub.collectAsState()
     val syncSavedToAniList by SettingsStore.syncSavedToAniList.collectAsState()
+    val menuLanguage by SettingsStore.menuLanguage.collectAsState()
     val updateState by UpdateManager.state.collectAsState()
     val profile = (profileState as? UiState.Success<AniListProfile>)?.data
     val scope = rememberCoroutineScope()
@@ -163,7 +166,9 @@ fun SettingsScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("Settings", fontWeight = FontWeight.Black) },
+                title = {
+                    Text(if (menuLanguage.usesSpanish()) "Ajustes" else "Settings", fontWeight = FontWeight.Black)
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -254,7 +259,13 @@ fun SettingsScreen(
             }
             item { SectionDivider() }
 
-            item { SettingsSectionTitle("App") }
+            item { SettingsSectionTitle(if (menuLanguage.usesSpanish()) "Aplicación" else "App") }
+            item {
+                MenuLanguageSetting(
+                    selected = menuLanguage,
+                    onSelect = SettingsStore::setMenuLanguage,
+                )
+            }
             item {
                 SettingsAction(
                     title = "Share diagnostics",
@@ -300,6 +311,45 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenuLanguageSetting(
+    selected: MenuLanguage,
+    onSelect: (MenuLanguage) -> Unit,
+) {
+    val spanish = selected.usesSpanish()
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Text(
+            if (spanish) "Idioma del menú" else "Menu language",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+        )
+        Text(
+            if (spanish) "Cambia las etiquetas de navegación principales" else "Changes the main navigation labels",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 6.dp),
+        ) {
+            MenuLanguage.entries.forEach { language ->
+                val label = when (language) {
+                    MenuLanguage.SYSTEM -> if (spanish) "Sistema" else "System"
+                    MenuLanguage.ENGLISH -> if (spanish) "Inglés" else "English"
+                    MenuLanguage.SPANISH -> "Español"
+                }
+                FilterChip(
+                    selected = selected == language,
+                    onClick = { onSelect(language) },
+                    label = { Text(label) },
+                    modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
                 )
             }
         }

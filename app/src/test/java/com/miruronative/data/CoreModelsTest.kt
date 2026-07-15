@@ -4,6 +4,8 @@ import com.miruronative.data.library.HistoryEntry
 import com.miruronative.data.library.WatchlistEntry
 import com.miruronative.data.library.mergeWatchlistEntries
 import com.miruronative.data.model.Media
+import com.miruronative.data.model.MediaRelationConnection
+import com.miruronative.data.model.MediaRelationEdge
 import com.miruronative.data.model.MediaTag
 import com.miruronative.data.model.contentAdvisory
 import org.junit.Assert.assertEquals
@@ -69,5 +71,25 @@ class CoreModelsTest {
         assertEquals("AniList title", merged.first().title)
         assertEquals(10, merged.first().addedAt)
         assertEquals(99, merged.last().addedAt)
+    }
+
+    @Test
+    fun seasonNeighborsKeepsOnlyUniquePrequelsAndSequels() {
+        val previous = Media(id = 1)
+        val sideStory = Media(id = 2)
+        val next = Media(id = 3)
+        val root = Media(
+            id = 10,
+            relations = MediaRelationConnection(
+                listOf(
+                    MediaRelationEdge("PREQUEL", previous),
+                    MediaRelationEdge("SIDE_STORY", sideStory),
+                    MediaRelationEdge("SEQUEL", next),
+                    MediaRelationEdge("SEQUEL", next),
+                ),
+            ),
+        )
+
+        assertEquals(listOf(1, 3), root.seasonNeighbors().map(Media::id))
     }
 }

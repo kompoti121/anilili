@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -18,18 +19,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,27 +52,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.LaunchedEffect
 import coil.compose.AsyncImage
-import com.miruronative.data.ProviderCatalog
+import com.miruronative.data.library.HistoryEntry
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.library.WatchlistEntry
 import com.miruronative.data.model.Category
-import com.miruronative.data.model.EpisodeItem
 import com.miruronative.data.model.Media
-import com.miruronative.data.model.contentAdvisory
 import com.miruronative.ui.UiState
 import com.miruronative.ui.components.ErrorBox
 import com.miruronative.ui.components.LoadingBox
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
+import com.miruronative.ui.components.AnimeCard
 import com.miruronative.ui.components.PullRefreshContainer
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,6 +80,8 @@ fun DetailScreen(
     animeId: Int,
     onBack: () -> Unit,
     onPlay: (provider: String, category: String, episode: String) -> Unit,
+    onAnimeClick: (Int) -> Unit,
+    onSeasonWatch: (Int) -> Unit,
     vm: DetailViewModel = viewModel(),
 ) {
     LaunchedEffect(animeId) { vm.load(animeId) }
@@ -139,9 +146,9 @@ fun DetailScreen(
                     data = s.data,
                     selectedProvider = vm.selectedProvider,
                     selectedCategory = vm.selectedCategory,
-                    onSelectProvider = vm::selectProvider,
-                    onSelectCategory = vm::selectCategory,
                     onPlay = onPlay,
+                    onAnimeClick = onAnimeClick,
+                    onSeasonWatch = onSeasonWatch,
                     resume = history.firstOrNull { it.anilistId == animeId },
                 )
             }
@@ -149,237 +156,320 @@ fun DetailScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DetailContent(
     data: DetailData,
     selectedProvider: String?,
     selectedCategory: Category,
-    onSelectProvider: (String) -> Unit,
-    onSelectCategory: (Category) -> Unit,
     onPlay: (String, String, String) -> Unit,
-    resume: com.miruronative.data.library.HistoryEntry?,
+    onAnimeClick: (Int) -> Unit,
+    onSeasonWatch: (Int) -> Unit,
+    resume: HistoryEntry?,
     modifier: Modifier = Modifier,
 ) {
-    val device = LocalAppDeviceProfile.current
     val info = data.info
     val provider = selectedProvider?.let { data.episodes.provider(it) }
     val episodes = provider?.episodes(selectedCategory).orEmpty()
-    val episodeRows = remember(episodes, device.episodeColumns) {
-        episodes.chunked(device.episodeColumns)
-    }
-    val visibleProviders = remember(data.episodes.providerNames, data.loadingMore) {
-        val pending = if (data.loadingMore) ProviderCatalog.anivexaProviders else emptyList()
-        (data.episodes.providerNames + pending)
-            .distinct()
-            .sortedBy(ProviderCatalog::sortKey)
-    }
-    val pendingProviders = remember(visibleProviders, data.episodes.providerNames) {
-        visibleProviders.toSet() - data.episodes.providerNames.toSet()
-    }
+    val canWatch = selectedProvider != null && episodes.isNotEmpty()
 
     LazyColumn(modifier = modifier.fillMaxSize()) {
         item { Header(info) }
-        item { ContentAdvisoryRow(info) }
         item { GenreRow(info.genres) }
+        item {
+            WatchButton(
+                resume = resume,
+                canWatch = canWatch,
+                resolving = !canWatch && resume == null && data.episodesError == null,
+                onWatch = {
+                    when {
+                        resume != null -> onPlay(resume.provider, resume.category, resume.episodeLabel)
+                        canWatch -> onPlay(selectedProvider!!, selectedCategory.api, episodes.first().displayNumber)
+                    }
+                },
+            )
+        }
         item { Description(info.description) }
-
-        if (resume != null) {
+        if (data.seriesLoading || data.series.size > 1) {
             item {
-                Button(
-                    onClick = { onPlay(resume.provider, resume.category, resume.episodeLabel) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = device.pagePadding, vertical = 8.dp)
-                        .focusHighlight(RoundedCornerShape(24.dp)),
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null)
-                    Text("Continue Episode ${resume.episodeLabel}", Modifier.padding(start = 6.dp))
-                }
-            }
-        }
-
-        if (visibleProviders.isNotEmpty()) {
-            item {
-                SelectorSection(
-                    providers = visibleProviders,
-                    pendingProviders = pendingProviders,
-                    selectedProvider = selectedProvider,
-                    categories = provider?.categories.orEmpty(),
-                    selectedCategory = selectedCategory,
-                    onSelectProvider = onSelectProvider,
-                    onSelectCategory = onSelectCategory,
+                SeriesSection(
+                    series = data.series,
+                    currentId = info.id,
+                    loading = data.seriesLoading,
+                    onAnimeClick = onAnimeClick,
+                    onSeasonWatch = onSeasonWatch,
                 )
-            }
-            if (selectedProvider != null && episodes.isNotEmpty()) {
-                item {
-                    Button(
-                        onClick = { onPlay(selectedProvider, selectedCategory.api, episodes.first().displayNumber) },
-                        modifier = Modifier
-                            .padding(horizontal = device.pagePadding, vertical = 4.dp)
-                            .focusHighlight(RoundedCornerShape(24.dp)),
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null)
-                        Text("Play Episode ${episodes.first().displayNumber}", Modifier.padding(start = 6.dp))
-                    }
-                }
-                item {
-                    Text(
-                        "Episodes",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(start = device.pagePadding, top = 12.dp, bottom = 4.dp),
-                    )
-                }
-                items(episodeRows) { row ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = device.pagePadding, vertical = 5.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        row.forEach { ep ->
-                            EpisodeChip(
-                                episode = ep,
-                                modifier = Modifier.weight(1f),
-                                onClick = { onPlay(selectedProvider, selectedCategory.api, ep.displayNumber) },
-                            )
-                        }
-                        repeat(device.episodeColumns - row.size) { Spacer(Modifier.weight(1f)) }
-                    }
-                }
-            }
-        } else {
-            item {
-                Text(
-                    text = data.episodesError ?: "No streaming sources found for this title.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(device.pagePadding),
-                )
-            }
-        }
-        if (data.loadingMore) {
-            item {
-                Row(
-                    Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Text("Checking more servers…", Modifier.padding(start = 10.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * The anime page's single call to action. Episode selection and source switching live on the
+ * watch screen, so this just enters playback — resuming if there's history, else the first episode.
+ */
 @Composable
-private fun ContentAdvisoryRow(media: Media) {
-    val advisory = remember(media) { media.contentAdvisory() }
-    if (!advisory.isAdult && advisory.labels.isEmpty()) return
+private fun WatchButton(
+    resume: HistoryEntry?,
+    canWatch: Boolean,
+    resolving: Boolean,
+    onWatch: () -> Unit,
+) {
     val device = LocalAppDeviceProfile.current
-    Column(Modifier.padding(horizontal = device.pagePadding, vertical = 4.dp)) {
-        Text(
-            "Content advisory",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 5.dp),
-        )
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (advisory.isAdult) AdvisoryBadge("18+", adult = true)
-            advisory.labels.forEach { label -> AdvisoryBadge(label) }
+    val enabled = resume != null || canWatch
+    Button(
+        onClick = onWatch,
+        enabled = enabled,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = device.pagePadding, vertical = 8.dp)
+            .focusHighlight(RoundedCornerShape(24.dp)),
+    ) {
+        if (resolving) {
+            CircularProgressIndicator(
+                Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onPrimary,
+            )
+            Text("Finding sources…", Modifier.padding(start = 8.dp))
+        } else {
+            Icon(Icons.Default.PlayArrow, contentDescription = null)
+            Text(
+                when {
+                    resume != null -> "Continue Episode ${resume.episodeLabel}"
+                    canWatch -> "Watch"
+                    else -> "No sources available"
+                },
+                Modifier.padding(start = 6.dp),
+            )
         }
-        Text(
-            "Estimated from AniList tags; not an official age rating",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp),
-        )
+    }
+}
+
+/** TV formats are the numbered "seasons"; everything else (movies, ONAs, specials) is "Related". */
+private val TV_SEASON_FORMATS = setOf("TV", "TV_SHORT")
+
+@Composable
+private fun SeriesSection(
+    series: List<Media>,
+    currentId: Int,
+    loading: Boolean,
+    onAnimeClick: (Int) -> Unit,
+    onSeasonWatch: (Int) -> Unit,
+) {
+    val seasons = remember(series) { series.filter { it.format in TV_SEASON_FORMATS } }
+    val related = remember(series) { series.filter { it.format !in TV_SEASON_FORMATS } }
+
+    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+        if (seasons.size > 1) {
+            SectionHeader("Seasons", loading = loading)
+            SeasonsDropdown(seasons = seasons, currentId = currentId, onSeasonWatch = onSeasonWatch)
+        }
+        if (related.isNotEmpty()) {
+            RelatedSection(related = related, currentId = currentId, onAnimeClick = onAnimeClick)
+        }
+        // Still walking the prequel/sequel chain and nothing groupable yet.
+        if (loading && seasons.size <= 1 && related.isEmpty()) {
+            SectionHeader("Seasons", loading = true)
+        }
     }
 }
 
 @Composable
-private fun AdvisoryBadge(label: String, adult: Boolean = false) {
-    val background = if (adult) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.surfaceVariant
-    val foreground = if (adult) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant
-    Box(
-        Modifier
-            .padding(bottom = 4.dp)
-            .clip(RoundedCornerShape(5.dp))
-            .background(background)
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(5.dp))
-            .padding(horizontal = 7.dp, vertical = 4.dp),
+private fun SectionHeader(title: String, loading: Boolean) {
+    val device = LocalAppDeviceProfile.current
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = device.pagePadding, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = foreground)
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
+        )
+        if (loading) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+        }
+    }
+}
+
+@Composable
+private fun CurrentBadge(modifier: Modifier = Modifier) {
+    Text(
+        "Current",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onPrimary,
+        modifier = modifier
+            .clip(RoundedCornerShape(5.dp))
+            .background(MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+    )
+}
+
+/** Compact season picker — one dropdown instead of a row of per-season cards. */
+@Composable
+private fun SeasonsDropdown(
+    seasons: List<Media>,
+    currentId: Int,
+    onSeasonWatch: (Int) -> Unit,
+) {
+    val device = LocalAppDeviceProfile.current
+    var expanded by remember { mutableStateOf(false) }
+    val currentIndex = seasons.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
+
+    Box(Modifier.fillMaxWidth().padding(horizontal = device.pagePadding, vertical = 4.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusHighlight(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
+                .clickable { expanded = true }
+                .padding(start = 14.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Season ${currentIndex + 1}",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                Icons.Filled.ArrowDropDown,
+                contentDescription = "Choose season",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            seasons.forEachIndexed { index, entry ->
+                val selected = entry.id == currentId
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            "Season ${index + 1}",
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selected) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        if (!selected) onSeasonWatch(entry.id)
+                    },
+                    trailingIcon = if (selected) {
+                        { Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                    } else null,
+                )
+            }
+        }
+    }
+}
+
+/** Movies, ONAs, and specials — collapsed by default so the page stays focused on seasons. */
+@Composable
+private fun RelatedSection(
+    related: List<Media>,
+    currentId: Int,
+    onAnimeClick: (Int) -> Unit,
+) {
+    val device = LocalAppDeviceProfile.current
+    var expanded by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusHighlight(RoundedCornerShape(8.dp))
+                .clickable { expanded = !expanded }
+                .padding(horizontal = device.pagePadding, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Related",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "  ${related.size}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = if (expanded) "Collapse" else "Expand",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (expanded) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = device.pagePadding),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.padding(top = 4.dp),
+            ) {
+                items(related, key = Media::id) { entry ->
+                    Box(Modifier.width(device.posterWidth)) {
+                        AnimeCard(
+                            media = entry,
+                            onClick = { if (entry.id != currentId) onAnimeClick(entry.id) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (entry.id == currentId) {
+                            CurrentBadge(Modifier.align(Alignment.TopEnd).padding(5.dp))
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
 private fun Header(info: Media) {
     val device = LocalAppDeviceProfile.current
-    val bannerHeight = when {
-        device.isTv -> 260.dp
-        device.isExpanded -> 230.dp
-        device.isTablet -> 200.dp
-        else -> 170.dp
-    }
     val coverWidth = when {
         device.isTv -> 156.dp
         device.isExpanded -> 140.dp
         device.isTablet -> 124.dp
         else -> 110.dp
     }
-    Column {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = if (device.isTv) device.pagePadding else 0.dp)
-                .height(bannerHeight)
-                .clip(if (device.isTv) RoundedCornerShape(18.dp) else RoundedCornerShape(0.dp)),
-        ) {
-            AsyncImage(
-                model = info.bannerImage ?: info.coverImage.best,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-            Box(
-                Modifier.fillMaxSize().background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        1f to MaterialTheme.colorScheme.background,
-                    ),
-                ),
-            )
-        }
-        Row(Modifier.padding(device.pagePadding)) {
-            AsyncImage(
-                model = info.coverImage.best,
-                contentDescription = info.title.preferred,
-                modifier = Modifier
-                    .width(coverWidth)
-                    .aspectRatio(2f / 3f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)),
-                contentScale = ContentScale.Crop,
-            )
-            Column(Modifier.padding(start = 12.dp)) {
-                Text(info.title.preferred, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+    Row(Modifier.padding(device.pagePadding)) {
+        AsyncImage(
+            model = info.coverImage.best,
+            contentDescription = info.title.preferred,
+            modifier = Modifier
+                .width(coverWidth)
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(10.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp)),
+            contentScale = ContentScale.Crop,
+        )
+        Column(Modifier.padding(start = 12.dp)) {
+            Text(info.title.preferred, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            info.title.romaji?.takeIf { it != info.title.preferred }?.let { romaji ->
                 Text(
-                    listOfNotNull(info.format, info.seasonYear?.toString()).joinToString(" • "),
-                    style = MaterialTheme.typography.bodyMedium,
+                    romaji,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontStyle = FontStyle.Italic,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
-                info.episodes?.let {
-                    Text("$it episodes", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                info.averageScore?.let {
-                    Text("★ $it%", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                }
-                info.status?.let {
-                    Text(it.replace('_', ' '), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
-                }
+            }
+            Text(
+                listOfNotNull(info.format, info.seasonYear?.toString()).joinToString(" • "),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            info.episodes?.let {
+                Text("$it episodes", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            info.averageScore?.let {
+                Text("★ $it%", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            }
+            info.status?.let {
+                Text(it.replace('_', ' '), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             }
         }
     }
@@ -391,19 +481,22 @@ private fun GenreRow(genres: List<String>) {
     if (genres.isEmpty()) return
     val device = LocalAppDeviceProfile.current
     FlowRow(
-        modifier = Modifier.padding(horizontal = device.pagePadding),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.padding(horizontal = device.pagePadding, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         genres.forEach { genre ->
             Box(
                 Modifier
-                    .padding(bottom = 6.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(bottom = 8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
             ) {
-                Text(genre, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    genre,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
             }
         }
     }
@@ -433,90 +526,3 @@ private fun Description(description: String?) {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-private fun SelectorSection(
-    providers: List<String>,
-    pendingProviders: Set<String>,
-    selectedProvider: String?,
-    categories: List<Category>,
-    selectedCategory: Category,
-    onSelectProvider: (String) -> Unit,
-    onSelectCategory: (Category) -> Unit,
-) {
-    val device = LocalAppDeviceProfile.current
-    Column(
-        Modifier
-            .padding(horizontal = device.pagePadding, vertical = 8.dp)
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
-            .padding(12.dp),
-    ) {
-        Text("Server", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            providers.forEach { name ->
-                val pending = name in pendingProviders
-                FilterChip(
-                    selected = name == selectedProvider,
-                    enabled = !pending,
-                    onClick = { onSelectProvider(name) },
-                    modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
-                    label = {
-                        val suffix = if (ProviderCatalog.isEmbed(name)) " ⧉" else ""
-                        Text(ProviderCatalog.label(name) + suffix)
-                    },
-                    leadingIcon = if (pending) {
-                        {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(14.dp),
-                                strokeWidth = 1.5.dp,
-                            )
-                        }
-                    } else null,
-                )
-            }
-        }
-        if (categories.size > 1 || categories.firstOrNull() == Category.DUB) {
-            Text("Audio", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                categories.forEach { cat ->
-                    FilterChip(
-                        selected = cat == selectedCategory,
-                        onClick = { onSelectCategory(cat) },
-                        modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
-                        label = { Text(cat.api.uppercase()) },
-                        colors = FilterChipDefaults.filterChipColors(),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EpisodeChip(episode: EpisodeItem, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val bg = if (episode.filler) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
-    Box(
-        modifier = modifier
-            .focusHighlight(RoundedCornerShape(8.dp))
-            .height(44.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(bg)
-            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(episode.displayNumber, style = MaterialTheme.typography.labelLarge)
-        if (episode.filler) {
-            Text(
-                "F",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 5.dp),
-            )
-        }
-    }
-}

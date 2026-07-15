@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -22,7 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -45,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -247,36 +251,82 @@ private fun ResultsGrid(results: List<Media>, filters: DiscoverFilters, onAnimeC
         }
         return
     }
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(tileMinWidth),
-        contentPadding = PaddingValues(horizontal = device.pagePadding, vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(if (device.isTv) 14.dp else 9.dp),
-        verticalArrangement = Arrangement.spacedBy(if (device.isTv) 16.dp else 14.dp),
-    ) {
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    if (filters.query.isBlank()) "Discover anime" else "Results for “${filters.query}”",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    SearchViewModel.SORTS.firstOrNull { it.value == filters.sort }?.label.orEmpty(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    val gridState = rememberLazyGridState()
+    var focusedResultIndex by remember(results) { mutableStateOf<Int?>(null) }
+    val horizontalSpacing = if (device.isTv) 14.dp else 9.dp
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val columnCount = adaptiveColumnCount(
+            availableWidth = maxWidth,
+            horizontalPadding = device.pagePadding,
+            minimumTileWidth = tileMinWidth,
+            spacing = horizontalSpacing,
+        )
+
+        LaunchedEffect(focusedResultIndex, columnCount, device.isTv) {
+            val resultIndex = focusedResultIndex ?: return@LaunchedEffect
+            if (device.isTv && resultIndex >= columnCount) {
+                val rowStart = (resultIndex / columnCount) * columnCount
+                // Keep the focused TV row together instead of exposing the previous row's
+                // detached title and metadata strip above it.
+                gridState.scrollToItem(rowStart + 1)
+            }
+        }
+
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(tileMinWidth),
+            state = gridState,
+            contentPadding = PaddingValues(horizontal = device.pagePadding, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(horizontalSpacing),
+            verticalArrangement = Arrangement.spacedBy(if (device.isTv) 16.dp else 14.dp),
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (filters.query.isBlank()) "Discover anime" else "Results for “${filters.query}”",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        SearchViewModel.SORTS.firstOrNull { it.value == filters.sort }?.label.orEmpty(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            gridItemsIndexed(results, key = { _, media -> media.id }) { index, media ->
+                AnimeCard(
+                    media = media,
+                    onClick = { onAnimeClick(media.id) },
+                    modifier = if (device.isTv) {
+                        Modifier.onFocusChanged { state ->
+                            if (state.isFocused) focusedResultIndex = index
+                        }
+                    } else {
+                        Modifier
+                    },
                 )
             }
         }
-        gridItems(results, key = { it.id }) { media ->
-            AnimeCard(media, onClick = { onAnimeClick(media.id) })
-        }
     }
+}
+
+private fun adaptiveColumnCount(
+    availableWidth: androidx.compose.ui.unit.Dp,
+    horizontalPadding: androidx.compose.ui.unit.Dp,
+    minimumTileWidth: androidx.compose.ui.unit.Dp,
+    spacing: androidx.compose.ui.unit.Dp,
+): Int {
+    val contentWidth = availableWidth - horizontalPadding * 2
+    return ((contentWidth.value + spacing.value) / (minimumTileWidth.value + spacing.value))
+        .toInt()
+        .coerceAtLeast(1)
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)

@@ -69,6 +69,7 @@ import com.miruronative.diagnostics.CrashReportDialog
 import com.miruronative.diagnostics.CrashReporter
 import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.data.settings.SettingsStore
+import com.miruronative.data.settings.MenuLanguage
 import com.miruronative.data.update.UpdateManager
 import com.miruronative.ui.detail.DetailScreen
 import com.miruronative.ui.FlixcloudResolverWebView
@@ -244,12 +245,20 @@ private fun View.visibilityName(): String = when (visibility) {
     else -> visibility.toString()
 }
 
-private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
-    HOME(Routes.HOME, "Home", Icons.Default.Home),
-    SEARCH(Routes.SEARCH, "Search", Icons.Default.Search),
-    SCHEDULE(Routes.SCHEDULE, "Schedule", Icons.Default.DateRange),
-    MORE(Routes.MORE, "Library", Icons.AutoMirrored.Filled.List),
-    SETTINGS(Routes.SETTINGS, "Settings", Icons.Default.Settings),
+private enum class Tab(
+    val route: String,
+    private val englishLabel: String,
+    private val spanishLabel: String,
+    val icon: ImageVector,
+) {
+    HOME(Routes.HOME, "Home", "Inicio", Icons.Default.Home),
+    SEARCH(Routes.SEARCH, "Search", "Buscar", Icons.Default.Search),
+    SCHEDULE(Routes.SCHEDULE, "Schedule", "Calendario", Icons.Default.DateRange),
+    MORE(Routes.MORE, "Library", "Biblioteca", Icons.AutoMirrored.Filled.List),
+    SETTINGS(Routes.SETTINGS, "Settings", "Ajustes", Icons.Default.Settings),
+    ;
+
+    fun label(language: MenuLanguage): String = if (language.usesSpanish()) spanishLabel else englishLabel
 }
 
 @Composable
@@ -263,6 +272,7 @@ private fun MiruroRoot(
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val showBottomBar = currentRoute in Routes.tabRoutes
+    val menuLanguage by SettingsStore.menuLanguage.collectAsState()
     var resolverWebViewsReady by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -307,11 +317,12 @@ private fun MiruroRoot(
                     if (showBottomBar && !deviceProfile.useNavigationRail) {
                         NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                             Tab.entries.forEach { tab ->
+                                val label = tab.label(menuLanguage)
                                 NavigationBarItem(
                                     selected = currentRoute == tab.route,
                                     onClick = { nav.navigateTab(tab.route) },
-                                    icon = { Icon(tab.icon, contentDescription = tab.label) },
-                                    label = { Text(tab.label) },
+                                    icon = { Icon(tab.icon, contentDescription = label) },
+                                    label = { Text(label) },
                                     colors = NavigationBarItemDefaults.colors(
                                         selectedIconColor = MaterialTheme.colorScheme.onPrimary,
                                         indicatorColor = MaterialTheme.colorScheme.primary,
@@ -331,6 +342,7 @@ private fun MiruroRoot(
                     if (showBottomBar && deviceProfile.useNavigationRail) {
                         AppNavigationRail(
                             currentRoute = currentRoute,
+                            menuLanguage = menuLanguage,
                             onNavigate = nav::navigateTab,
                             modifier = Modifier.fillMaxHeight(),
                         )
@@ -386,6 +398,7 @@ private fun NotificationPermissionEffect() {
 @Composable
 private fun AppNavigationRail(
     currentRoute: String?,
+    menuLanguage: MenuLanguage,
     onNavigate: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -410,11 +423,12 @@ private fun AppNavigationRail(
         },
     ) {
         Tab.entries.forEach { tab ->
+            val label = tab.label(menuLanguage)
             NavigationRailItem(
                 selected = currentRoute == tab.route,
                 onClick = { onNavigate(tab.route) },
-                icon = { Icon(tab.icon, contentDescription = tab.label) },
-                label = { Text(tab.label) },
+                icon = { Icon(tab.icon, contentDescription = label) },
+                label = { Text(label) },
                 alwaysShowLabel = device.isTv,
                 modifier = Modifier
                     .focusRequester(focusRequesters.getValue(tab))
@@ -487,8 +501,19 @@ private fun AppNavHost(
                 DetailScreen(
                     animeId = id,
                     onBack = { nav.popBackStack() },
+                    onAnimeClick = { relatedId ->
+                        if (relatedId != id) nav.navigate(Routes.detail(relatedId))
+                    },
                     onPlay = { provider, category, episode ->
                         nav.navigate(Routes.watch(id, provider, category, episode))
+                    },
+                    onSeasonWatch = { seasonId ->
+                        val saved = com.miruronative.data.library.LibraryStore.historyFor(seasonId)
+                        if (saved != null) {
+                            nav.navigate(Routes.watch(seasonId, saved.provider, saved.category, saved.episodeLabel))
+                        } else {
+                            nav.navigate(Routes.watch(seasonId, "auto", if (com.miruronative.data.settings.SettingsStore.preferDub.value) "dub" else "sub", "1"))
+                        }
                     },
                 )
             }
@@ -520,13 +545,6 @@ private fun AppNavHost(
                     episode = watchEpisode,
                     inPictureInPicture = inPictureInPicture,
                     onBack = { nav.popBackStack() },
-                    onAnimeDetails = {
-                        val id = args.getInt(Routes.Arg.ID)
-                        val route = Routes.detail(id)
-                        if (!nav.popBackStack(route, inclusive = false)) {
-                            nav.navigate(route) { launchSingleTop = true }
-                        }
-                    },
                 )
             }
         }

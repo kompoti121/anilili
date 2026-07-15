@@ -48,6 +48,15 @@ data class StudioConnection(val nodes: List<StudioNode> = emptyList())
 data class Trailer(val id: String? = null, val site: String? = null, val thumbnail: String? = null)
 
 @Serializable
+data class MediaRelationEdge(
+    val relationType: String? = null,
+    val node: Media? = null,
+)
+
+@Serializable
+data class MediaRelationConnection(val edges: List<MediaRelationEdge> = emptyList())
+
+@Serializable
 data class Media(
     val id: Int,
     val idMal: Int? = null,
@@ -73,6 +82,7 @@ data class Media(
     val startDate: FuzzyDate? = null,
     val endDate: FuzzyDate? = null,
     val trailer: Trailer? = null,
+    val relations: MediaRelationConnection = MediaRelationConnection(),
 )
 
 /** Filters supported by AniList's Media catalog query. */

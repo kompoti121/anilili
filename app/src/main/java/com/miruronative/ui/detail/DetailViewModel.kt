@@ -21,6 +21,8 @@ data class DetailData(
     val episodes: EpisodesResult,
     val episodesError: String?,
     val loadingMore: Boolean = false,
+    val series: List<Media> = listOf(info),
+    val seriesLoading: Boolean = true,
 )
 
 class DetailViewModel : ViewModel() {
@@ -52,6 +54,7 @@ class DetailViewModel : ViewModel() {
                 val anivexaRequest = async { runCatching { repo.anivexaEpisodes(id, force = force) } }
 
                 val info = infoRequest.await().getOrThrow() ?: error("Anime not found")
+                val seriesRequest = async { runCatching { repo.animeSeries(info) } }
 
                 // 1) Miruro pipe first (fast).
                 val miruroResult = miruroRequest.await()
@@ -60,14 +63,34 @@ class DetailViewModel : ViewModel() {
                 val firstError = if (miruro.providers.isEmpty() && miruroResult.isFailure) {
                     "Some servers unavailable"
                 } else null
-                _state.value = UiState.Success(DetailData(info, miruro, firstError, loadingMore = true))
+                _state.value = UiState.Success(
+                    DetailData(
+                        info = info,
+                        episodes = miruro,
+                        episodesError = firstError,
+                        loadingMore = true,
+                    ),
+                )
 
                 // 2) Merge the Anivexa batch, which has already been loading in parallel.
                 val anivexa = anivexaRequest.await().getOrDefault(EpisodesResult(emptyList()))
                 val merged = repo.mergeProviders(miruro, anivexa)
                 if (selectedProvider == null) applyDefaults(merged)
                 val err = if (merged.providers.isEmpty()) "No streaming sources found" else null
-                _state.value = UiState.Success(DetailData(info, merged, err, loadingMore = false))
+                _state.value = UiState.Success(
+                    DetailData(
+                        info = info,
+                        episodes = merged,
+                        episodesError = err,
+                        loadingMore = false,
+                    ),
+                )
+
+                val series = seriesRequest.await().getOrDefault(listOf(info))
+                val current = (_state.value as? UiState.Success)?.data
+                if (loadedId == id && current != null) {
+                    _state.value = UiState.Success(current.copy(series = series, seriesLoading = false))
+                }
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 _state.value = UiState.Error(e.message ?: "Failed to load")

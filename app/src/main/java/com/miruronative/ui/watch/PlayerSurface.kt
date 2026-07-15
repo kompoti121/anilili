@@ -745,29 +745,6 @@ private fun PlaybackSettingsMenu(
                 DropdownMenuItem(text = { Text("Only one quality available") }, onClick = onDismiss)
             }
 
-            HorizontalDivider()
-            SectionLabel("Skipping")
-            DropdownMenuItem(
-                text = { Text("Auto-skip intro/outro${if (autoSkipIntroOutro) " ✓" else ""}") },
-                onClick = {
-                    onAutoSkipIntroOutroChange(!autoSkipIntroOutro)
-                    onDismiss()
-                },
-            )
-
-            HorizontalDivider()
-            SectionLabel("Playback speed")
-            PlaybackSpeeds.forEach { speed ->
-                val selected = abs(controller.playbackParameters.speed - speed) < 0.01f
-                DropdownMenuItem(
-                    text = { Text("${speed.formatPlaybackSpeed()}${if (selected) " ✓" else ""}") },
-                    onClick = {
-                        controller.setPlaybackSpeed(speed)
-                        onDismiss()
-                    },
-                )
-            }
-
             val subtitleTracks = trackOptions(controller, trackNameProvider, C.TRACK_TYPE_TEXT)
             if (subtitleTracks.isNotEmpty()) {
                 HorizontalDivider()
@@ -823,6 +800,29 @@ private fun PlaybackSettingsMenu(
                         },
                     )
                 }
+            }
+
+            HorizontalDivider()
+            SectionLabel("Skipping")
+            DropdownMenuItem(
+                text = { Text("Auto-skip intro/outro${if (autoSkipIntroOutro) " ✓" else ""}") },
+                onClick = {
+                    onAutoSkipIntroOutroChange(!autoSkipIntroOutro)
+                    onDismiss()
+                },
+            )
+
+            HorizontalDivider()
+            SectionLabel("Playback speed")
+            PlaybackSpeeds.forEach { speed ->
+                val selected = abs(controller.playbackParameters.speed - speed) < 0.01f
+                DropdownMenuItem(
+                    text = { Text("${speed.formatPlaybackSpeed()}${if (selected) " ✓" else ""}") },
+                    onClick = {
+                        controller.setPlaybackSpeed(speed)
+                        onDismiss()
+                    },
+                )
             }
             }
         },

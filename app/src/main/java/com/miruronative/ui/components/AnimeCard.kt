@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,6 +42,11 @@ fun AnimeCard(
     modifier: Modifier = Modifier,
 ) {
     val device = LocalAppDeviceProfile.current
+    val titleStyle = MaterialTheme.typography.labelLarge
+    val titleMaxLines = if (device.isTv) 3 else 1
+    val tvTitleHeight = with(LocalDensity.current) {
+        titleStyle.lineHeight.toDp() * titleMaxLines
+    }
     Column(
         modifier = modifier
             .focusHighlight()
@@ -67,10 +74,12 @@ fun AnimeCard(
         }
         Text(
             text = media.title.preferred,
-            style = MaterialTheme.typography.labelLarge,
-            maxLines = if (device.isTv) 3 else 1,
+            style = titleStyle,
+            maxLines = titleMaxLines,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 5.dp),
+            modifier = Modifier
+                .padding(top = 5.dp)
+                .then(if (device.isTv) Modifier.height(tvTitleHeight) else Modifier),
         )
         Text(
             text = listOfNotNull(

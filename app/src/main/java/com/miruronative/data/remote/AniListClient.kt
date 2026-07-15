@@ -88,6 +88,12 @@ class AniListClient(
         nextAiringEpisode { episode airingAt timeUntilAiring }
         startDate { year month day }
         endDate { year month day }
+        relations {
+          edges {
+            relationType
+            node { $mediaListFields }
+          }
+        }
     """.trimIndent()
 
     private suspend fun queryPage(query: String, variables: JsonObject, page: Int): MediaPage =

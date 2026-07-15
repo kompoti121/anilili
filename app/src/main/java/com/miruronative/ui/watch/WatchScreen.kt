@@ -12,23 +12,28 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,6 +60,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -78,7 +84,6 @@ fun WatchScreen(
     episode: String,
     inPictureInPicture: Boolean = false,
     onBack: () -> Unit,
-    onAnimeDetails: () -> Unit,
     vm: WatchViewModel = viewModel(),
 ) {
     LaunchedEffect(animeId, provider, category, episode) {
@@ -198,7 +203,6 @@ fun WatchScreen(
                 data = s.data,
                 fullscreen = fullscreen || inPictureInPicture,
                 onBack = pauseAndBack,
-                onAnimeDetails = onAnimeDetails,
                 onPrev = vm::prev,
                 onNext = vm::next,
                 onChangeSource = vm::changeSource,
@@ -221,7 +225,6 @@ private fun WatchContent(
     data: WatchData,
     fullscreen: Boolean,
     onBack: () -> Unit,
-    onAnimeDetails: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
     onChangeSource: (String, String) -> Unit,
@@ -234,58 +237,12 @@ private fun WatchContent(
 ) {
     val device = LocalAppDeviceProfile.current
     val configuration = LocalConfiguration.current
-    var sourceMenuExpanded by remember { mutableStateOf(false) }
     val listFocus = remember { FocusRequester() }
 
     // TV: leaving fullscreen must hand focus to the episode/source area — otherwise it can
     // stay inside the player (or an embed WebView) and the D-pad never reaches the list.
     LaunchedEffect(fullscreen) {
         if (device.isTv && !fullscreen) runCatching { listFocus.requestFocus() }
-    }
-
-    // A dialog rather than a DropdownMenu: dialogs get reliable D-pad focus on TV, and the
-    // list is easier to hit on phones too.
-    if (sourceMenuExpanded) {
-        AlertDialog(
-            onDismissRequest = { sourceMenuExpanded = false },
-            title = { Text("Streaming source") },
-            text = {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 400.dp)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    data.sourceOptions.forEach { option ->
-                        val selected = option.provider == data.provider && option.category == data.category
-                        TextButton(
-                            onClick = {
-                                sourceMenuExpanded = false
-                                if (!selected) onChangeSource(option.provider, option.category.api)
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .focusHighlight(RoundedCornerShape(8.dp)),
-                        ) {
-                            Text(
-                                buildString {
-                                    append(ProviderCatalog.label(option.provider))
-                                    append(" ")
-                                    append(option.category.api.uppercase())
-                                    append(" • ${option.episodeCount} ep")
-                                    if (!option.hasCurrentEpisode) append(" • first available")
-                                    if (selected) append("  ✓")
-                                },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { sourceMenuExpanded = false }) { Text("Close") }
-            },
-        )
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -411,8 +368,7 @@ private fun WatchContent(
                         )
                         Text(
                             text = "Episode ${data.current.displayNumber}" +
-                                (data.current.title?.let { ": $it" } ?: "") +
-                                " • ${ProviderCatalog.label(data.provider)} ${data.category.api.uppercase()}",
+                                (data.current.title?.let { ": $it" } ?: ""),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -420,30 +376,11 @@ private fun WatchContent(
                         )
                     }
                 }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = device.pagePadding, vertical = 0.dp)
-                        .focusGroup(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(
-                        onClick = onAnimeDetails,
-                        modifier = Modifier
-                            .focusRequester(listFocus)
-                            .focusHighlight(RoundedCornerShape(20.dp)),
-                    ) {
-                        Text("Anime page")
-                    }
-                    TextButton(
-                        onClick = { sourceMenuExpanded = true },
-                        enabled = data.sourceOptions.isNotEmpty(),
-                        modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
-                    ) {
-                        Text("Source: ${ProviderCatalog.label(data.provider)} ${data.category.api.uppercase()}")
-                    }
-                }
+                SourceSelectors(
+                    data = data,
+                    onChangeSource = onChangeSource,
+                    focusRequester = listFocus,
+                )
                 data.notice?.let { notice ->
                     Text(
                         text = notice,
@@ -474,6 +411,234 @@ private fun WatchContent(
                 }
             }
             item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+/** Compact Server + Audio (sub/dub) dropdowns on one line, replacing the combined source list. */
+@Composable
+private fun SourceSelectors(
+    data: WatchData,
+    onChangeSource: (String, String) -> Unit,
+    focusRequester: FocusRequester,
+) {
+    val device = LocalAppDeviceProfile.current
+    val servers = remember(data.sourceOptions) { data.sourceOptions.map { it.provider }.distinct() }
+    val audioForServer = remember(data.sourceOptions, data.provider) {
+        data.sourceOptions.filter { it.provider == data.provider }.map { it.category }.distinct()
+    }
+    var showServerDialog by remember { mutableStateOf(false) }
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = device.pagePadding, vertical = 4.dp)
+            .focusGroup(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Server also carries the TV focus anchor for leaving fullscreen.
+        CompactClickablePill(
+            label = ProviderCatalog.label(data.provider),
+            enabled = servers.isNotEmpty(),
+            focusRequester = focusRequester,
+            onClick = { showServerDialog = true }
+        )
+        CompactDropdown(
+            label = data.category.api.uppercase(),
+            enabled = audioForServer.size > 1,
+        ) { dismiss ->
+            audioForServer.forEach { category ->
+                val selected = category == data.category
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            category.api.uppercase(),
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selected) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                        )
+                    },
+                    trailingIcon = if (selected) {
+                        { Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                    } else null,
+                    onClick = {
+                        dismiss()
+                        if (!selected) onChangeSource(data.provider, category.api)
+                    },
+                )
+            }
+        }
+    }
+
+    if (showServerDialog) {
+        Dialog(onDismissRequest = {
+            showServerDialog = false
+            if (device.isTv) runCatching { focusRequester.requestFocus() }
+        }) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 440.dp)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+                    .padding(20.dp)
+            ) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Select Server",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "${servers.size} available",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 280.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val columns = if (device.isTv) 4 else 3
+                        val rows = servers.chunked(columns)
+                        rows.forEach { rowServers ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                rowServers.forEach { server ->
+                                    val selected = server == data.provider
+                                    val bg = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+                                    val textColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp)
+                                            .focusHighlight(RoundedCornerShape(8.dp))
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(bg)
+                                            .border(
+                                                1.dp,
+                                                if (selected) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.outline,
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .clickable {
+                                                showServerDialog = false
+                                                if (device.isTv) runCatching { focusRequester.requestFocus() }
+                                                if (!selected) {
+                                                    val options = data.sourceOptions.filter { it.provider == server }
+                                                    val category = options.firstOrNull { it.category == data.category }?.category
+                                                        ?: options.first().category
+                                                    onChangeSource(server, category.api)
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = ProviderCatalog.label(server),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                            color = textColor,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(horizontal = 4.dp)
+                                        )
+                                    }
+                                }
+                                repeat(columns - rowServers.size) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+
+                    TextButton(
+                        onClick = {
+                            showServerDialog = false
+                            if (device.isTv) runCatching { focusRequester.requestFocus() }
+                        },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Close")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Compact bordered pill that triggers an onClick callback. */
+@Composable
+private fun CompactClickablePill(
+    label: String,
+    enabled: Boolean,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+            .focusHighlight(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Icon(
+            Icons.Filled.ArrowDropDown,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Compact bordered pill that opens a dropdown menu. */
+@Composable
+private fun CompactDropdown(
+    label: String,
+    enabled: Boolean,
+    focusRequester: FocusRequester? = null,
+    content: @Composable ColumnScope.(dismiss: () -> Unit) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                .focusHighlight(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(10.dp))
+                .clickable(enabled = enabled) { expanded = true }
+                .padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Icon(
+                Icons.Filled.ArrowDropDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            content { expanded = false }
         }
     }
 }
