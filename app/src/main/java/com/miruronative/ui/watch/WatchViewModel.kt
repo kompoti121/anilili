@@ -69,6 +69,8 @@ class WatchViewModel : ViewModel() {
     private var startedKey: String? = null
     private var seriesTitle = "Anime"
     private var artworkUrl: String? = null
+    private var totalEpisodes: Int? = null
+    private val syncedAniListEpisodes = mutableSetOf<Int>()
     private var lastRequestedNumber = 1.0
     private var failedProviders = mutableSetOf<String>()
     private var resolveJob: Job? = null
@@ -87,6 +89,8 @@ class WatchViewModel : ViewModel() {
         anilistId = id
         category = Category.from(categoryApi)
         preferred = providerName
+        totalEpisodes = null
+        syncedAniListEpisodes.clear()
         failedProviders.clear()
         mergedIncludesAnivexa = false
 
@@ -120,6 +124,7 @@ class WatchViewModel : ViewModel() {
                 repo.animeInfo(id)?.let { info ->
                     seriesTitle = info.title.preferred
                     artworkUrl = info.coverImage.best
+                    totalEpisodes = info.episodes
                     DiagnosticsLog.event("Watch animeInfo success id=$id title=${seriesTitle.take(80)}")
                 }
                 spine = pickSpine(merged)
@@ -300,19 +305,33 @@ class WatchViewModel : ViewModel() {
                 durationMs = LibraryStore.historyFor(anilistId)?.takeIf { it.episodeNumber == number }?.durationMs ?: 0L,
             ),
         )
-        if (AuthManager.isLoggedIn && SettingsStore.autoSyncAniList.value) {
-            runCatching { repo.saveAniListProgress(anilistId, number.toInt()) }
-                .onFailure { DiagnosticsLog.throwable("Watch AniList progress sync failed id=$anilistId episode=${fmt(number)}", it) }
-        }
     }
 
     private var lastProgressSave = 0L
     fun onProgress(positionMs: Long, durationMs: Long) {
         val data = (_state.value as? UiState.Success)?.data ?: return
+        maybeSyncAniListProgress(data.current.number, positionMs, durationMs)
         val now = System.currentTimeMillis()
         if (now - lastProgressSave < 8_000) return
         lastProgressSave = now
         LibraryStore.updateProgress(anilistId, data.current.number, positionMs, durationMs)
+    }
+
+    private fun maybeSyncAniListProgress(episodeNumber: Double, positionMs: Long, durationMs: Long) {
+        if (!AuthManager.isLoggedIn || !SettingsStore.autoSyncAniList.value) return
+        if (!shouldSyncAniListProgress(episodeNumber, positionMs, durationMs)) return
+        val episode = episodeNumber.toInt()
+        if (!syncedAniListEpisodes.add(episode)) return
+        viewModelScope.launch {
+            runCatching { repo.saveAniListProgress(anilistId, episode, totalEpisodes) }
+                .onFailure {
+                    syncedAniListEpisodes.remove(episode)
+                    DiagnosticsLog.throwable(
+                        "Watch AniList progress sync failed id=$anilistId episode=${fmt(episodeNumber)}",
+                        it,
+                    )
+                }
+        }
     }
 
     fun playIndex(index: Int) {
@@ -405,6 +424,15 @@ class WatchViewModel : ViewModel() {
             "height=${height ?: "auto"} host=${runCatching { Uri.parse(url).host }.getOrNull() ?: "unknown"}"
     }
 }
+
+internal fun shouldSyncAniListProgress(episodeNumber: Double, positionMs: Long, durationMs: Long): Boolean {
+    if (episodeNumber < 1 || episodeNumber % 1.0 != 0.0) return false
+    if (durationMs < MIN_ANILIST_SYNC_DURATION_MS || positionMs <= 0) return false
+    return positionMs.toDouble() / durationMs >= ANILIST_SYNC_WATCHED_FRACTION
+}
+
+private const val MIN_ANILIST_SYNC_DURATION_MS = 60_000L
+private const val ANILIST_SYNC_WATCHED_FRACTION = 0.80
 
 /** Provider-specific first-player policy, applied only after that provider has resolved sources. */
 internal fun pickProviderStream(provider: String, sources: SourcesResult): StreamItem? {

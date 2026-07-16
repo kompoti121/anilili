@@ -263,14 +263,16 @@ class ReleaseSyncWorker(
     }
 
     private suspend fun anilistTrackedMedia(repo: com.miruronative.data.MiruroRepository): List<Media> {
-        val viewer = runCatching { repo.viewer() }.getOrNull() ?: return emptyList()
-        val activeStatuses = setOf("CURRENT", "REPEATING", "PLANNING", "PAUSED")
-        val listMedia = runCatching { repo.userAnimeList(viewer.id) }.getOrNull()
+        val viewerId = AuthManager.viewerId() ?: runCatching { repo.viewer() }.getOrNull()?.id ?: return emptyList()
+        // AniList's airing pushes cover shows the user is actively watching/rewatching. Planning,
+        // paused, and favourite-only titles still need the app's local release alarm.
+        val activeStatuses = setOf("CURRENT", "REPEATING")
+        val listMedia = runCatching { repo.userAnimeList(viewerId) }.getOrNull()
             ?.lists.orEmpty()
-            .filter { it.status in activeStatuses }
             .flatMap { it.entries }
+            .distinctBy { it.id }
+            .filter { it.status in activeStatuses }
             .mapNotNull { it.media }
-        val favouriteMedia = runCatching { repo.favouriteAnime() }.getOrDefault(emptyList())
-        return (listMedia + favouriteMedia).distinctBy { it.id }
+        return listMedia.distinctBy { it.id }
     }
 }

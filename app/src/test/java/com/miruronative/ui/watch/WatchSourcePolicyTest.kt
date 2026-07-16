@@ -71,6 +71,14 @@ class WatchSourcePolicyTest {
         assertEquals("preferred", spine.first().pipeId)
     }
 
+    @Test
+    fun `anilist progress waits until most of a full integer episode was watched`() {
+        assertTrue(shouldSyncAniListProgress(3.0, positionMs = 1_200_000, durationMs = 1_440_000))
+        assertEquals(false, shouldSyncAniListProgress(3.0, positionMs = 600_000, durationMs = 1_440_000))
+        assertEquals(false, shouldSyncAniListProgress(3.5, positionMs = 1_300_000, durationMs = 1_440_000))
+        assertEquals(false, shouldSyncAniListProgress(3.0, positionMs = 45_000, durationMs = 50_000))
+    }
+
     private fun sources(vararg streams: StreamItem) = SourcesResult(streams.toList(), emptyList(), null, null)
 
     private fun stream(url: String, type: String, quality: String, active: Boolean = false) = StreamItem(

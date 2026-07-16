@@ -97,7 +97,7 @@ object LibraryStore {
         val savedIds = _watchlist.value.map { it.anilistId }
         scope.launch {
             aniListSyncMutex.withLock {
-                savedIds.forEach { id -> runCatching { AppGraph.repository.syncSavedAnime(id, true) } }
+                runCatching { AppGraph.repository.syncSavedAnime(savedIds) }
             }
         }
     }

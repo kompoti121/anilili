@@ -127,7 +127,7 @@ fun LoginWebView(onToken: (String) -> Unit, onCancel: () -> Unit) {
                                 }
                             }
                             if (device.isTv) addJavascriptInterface(TvImeBridge(this), "MiruroTvIme")
-                            loadUrl(AuthManager.AUTHORIZE_URL)
+                            loadUrl(AuthManager.authorizeUrl())
                             if (device.isTv) post { requestFocus() }
                         }
                     } catch (e: Throwable) {

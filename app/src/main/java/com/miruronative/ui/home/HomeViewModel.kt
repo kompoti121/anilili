@@ -7,12 +7,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.miruronative.data.AppGraph
 import com.miruronative.diagnostics.DiagnosticsLog
-import com.miruronative.data.model.DiscoverFilters
 import com.miruronative.data.model.Media
 import com.miruronative.ui.UiState
 import com.miruronative.ui.rethrowIfCancellation
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -59,34 +56,14 @@ class HomeViewModel : ViewModel() {
             DiagnosticsLog.event("Home load start force=$force")
             if (force && _state.value is UiState.Success) _isRefreshing.value = true else _state.value = UiState.Loading
             try {
-                // Sections load independently: one failed AniList query must not cancel the
-                // other four, so a flaky network degrades to missing rows instead of an error.
-                val data = coroutineScope {
-                    val spotlight = async { runCatching { repo.trending(force = force).items } }
-                    val newest = async { runCatching { repo.recentlyReleased(force = force).items } }
-                    val popular = async { runCatching { repo.popular(force = force).items } }
-                    val movies = async {
-                        runCatching {
-                            repo.discover(DiscoverFilters(format = "MOVIE", sort = "POPULARITY_DESC"), force = force).items
-                        }
-                    }
-                    val topRated = async { runCatching { repo.topRated(force = force).items } }
-                    val sections = listOf(spotlight, newest, popular, movies, topRated).map { it.await() }
-                    sections.forEach { section ->
-                        section.exceptionOrNull()?.let {
-                            it.rethrowIfCancellation()
-                            DiagnosticsLog.throwable("Home section failed", it)
-                        }
-                    }
-                    if (sections.all { it.isFailure }) throw sections.first().exceptionOrNull()!!
-                    HomeData(
-                        spotlight = sections[0].getOrDefault(emptyList()),
-                        newest = sections[1].getOrDefault(emptyList()),
-                        popular = sections[2].getOrDefault(emptyList()),
-                        movies = sections[3].getOrDefault(emptyList()),
-                        topRated = sections[4].getOrDefault(emptyList()),
-                    )
-                }
+                val collections = repo.homeCollections(force)
+                val data = HomeData(
+                    spotlight = collections.spotlight,
+                    newest = collections.newest,
+                    popular = collections.popular,
+                    movies = collections.movies,
+                    topRated = collections.topRated,
+                )
                 DiagnosticsLog.event(
                     "Home load success spotlight=${data.spotlight.size} newest=${data.newest.size} " +
                         "popular=${data.popular.size} movies=${data.movies.size} topRated=${data.topRated.size}",

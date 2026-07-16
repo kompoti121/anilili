@@ -5,14 +5,20 @@ import org.junit.Test
 
 class AniListRateSlotTest {
     @Test
-    fun `ample budget starts immediately and spaces bursts by the minimum gap`() {
+    fun `default degraded quota spaces calls across one minute`() {
         val (start, next) = nextRateSlot(now = 1_000, remaining = 50, reset = 0, nextSlot = 0)
         assertEquals(1_000L, start) // no wait
-        assertEquals(1_090L, next)  // next reserved a minimum gap later
+        assertEquals(3_100L, next)  // 30/min plus a small boundary safety margin
 
         // A second call arriving at the same instant is pushed to the reserved slot.
         val (start2, _) = nextRateSlot(now = 1_000, remaining = 50, reset = 0, nextSlot = next)
-        assertEquals(1_090L, start2)
+        assertEquals(3_100L, start2)
+    }
+
+    @Test
+    fun `server advertised normal quota increases pacing safely`() {
+        val (_, next) = nextRateSlot(now = 1_000, remaining = 80, reset = 0, nextSlot = 0, limit = 90)
+        assertEquals(1_766L, next)
     }
 
     @Test
@@ -32,7 +38,7 @@ class AniListRateSlotTest {
         // 4 calls left, 8s until reset -> ~2s between calls.
         val (start, next) = nextRateSlot(now = 1_000, remaining = 4, reset = 9_000, nextSlot = 0)
         assertEquals(1_000L, start)
-        assertEquals(3_000L, next)
+        assertEquals(3_100L, next)
     }
 
     @Test

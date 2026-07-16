@@ -14,6 +14,16 @@ import org.junit.Test
 
 class CoreModelsTest {
     @Test
+    fun `anime display titles prefer english over AniList viewer preference`() {
+        val title = com.miruronative.data.model.MediaTitle(
+            english = "Attack on Titan",
+            userPreferred = "Shingeki no Kyojin",
+            romaji = "Shingeki no Kyojin",
+        )
+        assertEquals("Attack on Titan", title.preferred)
+    }
+
+    @Test
     fun historyProgressIsBoundedAndEpisodeLabelIsFriendly() {
         val entry = HistoryEntry(
             anilistId = 1,

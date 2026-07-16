@@ -1,12 +1,18 @@
 package com.miruronative.data.auth
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.net.Uri
+import android.util.Base64
+import java.security.SecureRandom
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.miruronative.data.reminder.AniListNotificationPushManager
 import com.miruronative.data.reminder.ReleaseSyncScheduler
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.intOrNull
 
 /**
  * AniList OAuth (Implicit Grant). AniList redirects to `http://localhost/#access_token=…`; the
@@ -16,36 +22,57 @@ import com.miruronative.data.reminder.ReleaseSyncScheduler
 object AuthManager {
     const val CLIENT_ID = "45552"
     const val REDIRECT = "http://localhost"
-    const val AUTHORIZE_URL =
-        "https://anilist.co/api/v2/oauth/authorize?client_id=$CLIENT_ID&response_type=token"
+    private const val AUTHORIZE_ENDPOINT = "https://anilist.co/api/v2/oauth/authorize"
 
-    private lateinit var prefs: SharedPreferences
+    private lateinit var tokenStore: SecureTokenStore
     private lateinit var appContext: Context
+    private var pendingOAuthState: String? = null
 
     private val _token = MutableStateFlow<String?>(null)
     val token = _token.asStateFlow()
 
     fun init(context: Context) {
         appContext = context.applicationContext
-        prefs = appContext.getSharedPreferences("miruro_auth", Context.MODE_PRIVATE)
-        _token.value = prefs.getString("anilist_token", null)
+        tokenStore = SecureTokenStore(appContext)
+        _token.value = tokenStore.load()?.takeUnless(::isJwtExpired)
+        if (_token.value == null) tokenStore.clear()
     }
 
-    fun current(): String? = _token.value
-    val isLoggedIn: Boolean get() = _token.value != null
+    fun current(): String? {
+        val value = _token.value ?: return null
+        if (!isJwtExpired(value)) return value
+        clearToken(scheduleSync = false)
+        return null
+    }
+
+    val isLoggedIn: Boolean get() = current() != null
+    fun viewerId(): Int? = current()?.let(::jwtSubject)
+
+    fun authorizeUrl(): String {
+        val state = ByteArray(24).also(SecureRandom()::nextBytes)
+            .let { Base64.encodeToString(it, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING) }
+        pendingOAuthState = state
+        return Uri.parse(AUTHORIZE_ENDPOINT).buildUpon()
+            .appendQueryParameter("client_id", CLIENT_ID)
+            .appendQueryParameter("redirect_uri", REDIRECT)
+            .appendQueryParameter("response_type", "token")
+            .appendQueryParameter("state", state)
+            .build()
+            .toString()
+    }
 
     fun setToken(token: String) {
-        prefs.edit().putString("anilist_token", token).apply()
-        _token.value = token
+        val normalized = token.trim()
+        require(normalized.isNotEmpty()) { "AniList returned an empty token" }
+        tokenStore.save(normalized)
+        _token.value = normalized
+        pendingOAuthState = null
         AniListNotificationPushManager.clearDelivered(appContext)
         ReleaseSyncScheduler.runNow(appContext)
     }
 
     fun logout() {
-        prefs.edit().remove("anilist_token").apply()
-        _token.value = null
-        AniListNotificationPushManager.clearDelivered(appContext)
-        ReleaseSyncScheduler.runNow(appContext)
+        clearToken(scheduleSync = true)
     }
 
     /** True once a redirect URL carries the token; extract it with [extractToken]. */
@@ -55,7 +82,37 @@ object AuthManager {
     }
 
     fun extractToken(url: String): String? {
-        if (!url.contains("access_token=")) return null
-        return url.substringAfter("access_token=").substringBefore("&").takeIf { it.isNotBlank() }
+        if (!isRedirect(url)) return null
+        val uri = Uri.parse(url)
+        val fragment = Uri.parse("$REDIRECT/?${uri.fragment.orEmpty()}")
+        val expectedState = pendingOAuthState ?: return null
+        if (fragment.getQueryParameter("state") != expectedState) return null
+        return fragment.getQueryParameter("access_token")?.takeIf { it.isNotBlank() }
+    }
+
+    private fun clearToken(scheduleSync: Boolean) {
+        tokenStore.clear()
+        _token.value = null
+        pendingOAuthState = null
+        AniListNotificationPushManager.clearDelivered(appContext)
+        if (scheduleSync) ReleaseSyncScheduler.runNow(appContext)
     }
 }
+
+private val jwtJson = Json { ignoreUnknownKeys = true }
+
+internal fun isJwtExpired(token: String, nowEpochSeconds: Long = System.currentTimeMillis() / 1_000): Boolean {
+    val expiration = jwtLongClaim(token, "exp") ?: return false
+    return expiration <= nowEpochSeconds + TOKEN_EXPIRY_SKEW_SECONDS
+}
+
+internal fun jwtSubject(token: String): Int? = jwtLongClaim(token, "sub")?.toInt()
+
+private fun jwtLongClaim(token: String, name: String): Long? = runCatching {
+    val payload = token.split('.').getOrNull(1) ?: return@runCatching null
+    val decoded = java.util.Base64.getUrlDecoder().decode(payload)
+    val value = jwtJson.parseToJsonElement(decoded.toString(Charsets.UTF_8)).jsonObject[name]?.jsonPrimitive
+    value?.longOrNull ?: value?.intOrNull?.toLong()
+}.getOrNull()
+
+private const val TOKEN_EXPIRY_SKEW_SECONDS = 60L

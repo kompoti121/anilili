@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.miruronative.data.AppGraph
 import com.miruronative.data.auth.AuthManager
 import com.miruronative.data.model.MediaListEntry
+import com.miruronative.data.model.MediaListCollection
 import com.miruronative.data.model.Viewer
 import com.miruronative.data.library.HistoryEntry
 import com.miruronative.data.library.LibraryStore
@@ -48,13 +49,13 @@ class ProfileViewModel : ViewModel() {
             if (refresh && _profile.value is UiState.Success) _isRefreshing.value = true else _profile.value = UiState.Loading
             try {
                 val viewer = repo.viewer() ?: error("Couldn't load your AniList profile")
-                val lists = repo.userAnimeList(viewer.id)?.lists ?: emptyList()
-                val watching = lists.filter { it.status == "CURRENT" }.flatMap { it.entries }
-                val rewatching = lists.filter { it.status == "REPEATING" }.flatMap { it.entries }
-                val planning = lists.filter { it.status == "PLANNING" }.flatMap { it.entries }
-                val paused = lists.filter { it.status == "PAUSED" }.flatMap { it.entries }
-                val completed = lists.filter { it.status == "COMPLETED" }.flatMap { it.entries }
-                val dropped = lists.filter { it.status == "DROPPED" }.flatMap { it.entries }
+                val entries = repo.userAnimeList(viewer.id).allEntries()
+                val watching = entries.filter { it.status == "CURRENT" }
+                val rewatching = entries.filter { it.status == "REPEATING" }
+                val planning = entries.filter { it.status == "PLANNING" }
+                val paused = entries.filter { it.status == "PAUSED" }
+                val completed = entries.filter { it.status == "COMPLETED" }
+                val dropped = entries.filter { it.status == "DROPPED" }
                 if (SettingsStore.syncSavedToAniList.value) {
                     LibraryStore.hydrateWatchlistFromAniList(
                         planning.mapNotNull { entry ->
@@ -162,3 +163,8 @@ class ProfileViewModel : ViewModel() {
         MalExport.fromEntries(profile?.viewer?.name, entries.values.toList(), skipped)
     }
 }
+
+/** Custom-list-only entries are duplicated across groups; flatten and classify by entry status. */
+internal fun MediaListCollection?.allEntries(): List<MediaListEntry> = this?.lists.orEmpty()
+    .flatMap { it.entries }
+    .distinctBy { it.id }

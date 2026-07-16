@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -66,6 +67,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -240,46 +242,52 @@ private fun HomeContent(
                 "history=${history.size} selectedTab=${selectedTab.name}",
         )
     }
-    val columns = when {
-        device.isTv -> 7
-        device.isExpanded -> 6
-        device.isTablet -> 4
-        else -> 3
-    }
     val catalog = data.tab(selectedTab).take(if (device.isTv) 28 else 18)
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            HeroPager(
-                items = data.spotlight.take(6),
-                onAnimeClick = onAnimeClick,
-                onWatchNow = onWatchNow,
-                onMoveDown = if (history.isNotEmpty()) {
-                    { runCatching { continueFocusRequester.requestFocus() } }
-                } else {
-                    null
-                },
-            )
-        }
-        if (history.isNotEmpty()) {
-            item { ContinueRail(history.take(12), onResume, continueFocusRequester) }
-        }
-        item { HomeCatalogTabs(selectedTab, onSelectTab) }
-        items(catalog.chunked(columns)) { row ->
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = device.pagePadding),
-                horizontalArrangement = Arrangement.spacedBy(if (device.isTv) 16.dp else 9.dp),
-            ) {
-                row.forEach { media ->
-                    AnimeCard(media, { onAnimeClick(media.id) }, Modifier.weight(1f))
-                }
-                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+    val gridSpacing = if (device.isTv) 16.dp else 9.dp
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        // Size every home poster card to a single width, derived from posterWidth, so the
+        // catalog grid and the "Trending" rail share one universal card size. Columns are
+        // fitted to the real content width (maxWidth already excludes any navigation rail).
+        val available = maxWidth - device.pagePadding * 2f
+        val columns = maxOf(
+            1,
+            ((available.value + gridSpacing.value) / (device.posterWidth.value + gridSpacing.value)).toInt(),
+        )
+        val cardWidth = (available - gridSpacing * (columns - 1).toFloat()) / columns.toFloat()
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item {
+                HeroPager(
+                    items = data.spotlight.take(6),
+                    onAnimeClick = onAnimeClick,
+                    onWatchNow = onWatchNow,
+                    onMoveDown = if (history.isNotEmpty()) {
+                        { runCatching { continueFocusRequester.requestFocus() } }
+                    } else {
+                        null
+                    },
+                )
             }
+            if (history.isNotEmpty()) {
+                item { ContinueRail(history.take(12), onResume, continueFocusRequester) }
+            }
+            item { HomeCatalogTabs(selectedTab, onSelectTab) }
+            items(catalog.chunked(columns)) { row ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = device.pagePadding),
+                    horizontalArrangement = Arrangement.spacedBy(gridSpacing),
+                ) {
+                    row.forEach { media ->
+                        AnimeCard(media, { onAnimeClick(media.id) }, Modifier.weight(1f))
+                    }
+                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+            item { MediaRail("Trending this week", data.spotlight, onAnimeClick, cardWidth) }
         }
-        item { MediaRail("Trending this week", data.spotlight, onAnimeClick) }
     }
 }
 
@@ -541,7 +549,7 @@ private data class HeroFocusRequesters(
 )
 
 @Composable
-private fun MediaRail(title: String, media: List<Media>, onAnimeClick: (Int) -> Unit) {
+private fun MediaRail(title: String, media: List<Media>, onAnimeClick: (Int) -> Unit, cardWidth: Dp) {
     val device = LocalAppDeviceProfile.current
     Column {
         Text(
@@ -559,7 +567,7 @@ private fun MediaRail(title: String, media: List<Media>, onAnimeClick: (Int) -> 
                 AnimeCard(
                     media = item,
                     onClick = { onAnimeClick(item.id) },
-                    modifier = Modifier.width(device.posterWidth),
+                    modifier = Modifier.width(cardWidth),
                 )
             }
         }

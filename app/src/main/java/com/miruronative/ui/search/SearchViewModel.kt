@@ -31,11 +31,17 @@ class SearchViewModel : ViewModel() {
     val state = _state.asStateFlow()
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing = _isRefreshing.asStateFlow()
+    private val _isLoadingMore = MutableStateFlow(false)
+    val isLoadingMore = _isLoadingMore.asStateFlow()
 
     private val _options = MutableStateFlow(DiscoverOptions(genres = DEFAULT_GENRES))
     val options = _options.asStateFlow()
 
     private var searchJob: Job? = null
+    private var loadMoreJob: Job? = null
+    private var currentPage = 1
+    private var hasNextPage = false
+    private var requestGeneration = 0
 
     init {
         viewModelScope.launch {
@@ -76,17 +82,48 @@ class SearchViewModel : ViewModel() {
     }
 
     private fun submit(delayMs: Long, force: Boolean = false) {
+        requestGeneration++
+        val generation = requestGeneration
         searchJob?.cancel()
+        loadMoreJob?.cancel()
+        _isLoadingMore.value = false
         searchJob = viewModelScope.launch {
             if (delayMs > 0) delay(delayMs)
             if (force && _state.value is UiState.Success) _isRefreshing.value = true else _state.value = UiState.Loading
-            runCatching { repo.discover(filters, force = force).items }
-                .onSuccess { _state.value = UiState.Success(it) }
+            val requestedFilters = filters
+            runCatching { repo.discover(requestedFilters, page = 1, force = force) }
+                .onSuccess { page ->
+                    if (generation != requestGeneration) return@onSuccess
+                    currentPage = page.page
+                    hasNextPage = page.hasNextPage
+                    _state.value = UiState.Success(page.items)
+                }
                 .onFailure {
                     it.rethrowIfCancellation()
+                    if (generation != requestGeneration) return@onFailure
                     _state.value = UiState.Error(it.message ?: "Could not load the catalog")
                 }
-            _isRefreshing.value = false
+            if (generation == requestGeneration) _isRefreshing.value = false
+        }
+    }
+
+    fun loadMore() {
+        if (!hasNextPage || _isLoadingMore.value || loadMoreJob?.isActive == true) return
+        val existing = (_state.value as? UiState.Success)?.data ?: return
+        val requestedFilters = filters
+        val generation = requestGeneration
+        val nextPage = currentPage + 1
+        _isLoadingMore.value = true
+        loadMoreJob = viewModelScope.launch {
+            runCatching { repo.discover(requestedFilters, page = nextPage) }
+                .onSuccess { page ->
+                    if (generation != requestGeneration || requestedFilters != filters) return@onSuccess
+                    currentPage = page.page
+                    hasNextPage = page.hasNextPage
+                    _state.value = UiState.Success((existing + page.items).distinctBy(Media::id))
+                }
+                .onFailure { it.rethrowIfCancellation() }
+            if (generation == requestGeneration) _isLoadingMore.value = false
         }
     }
 

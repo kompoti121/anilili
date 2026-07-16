@@ -1,5 +1,6 @@
 package com.miruronative.ui.search
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -49,9 +52,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,6 +86,7 @@ import com.miruronative.ui.components.AnimeCard
 import com.miruronative.ui.components.ErrorBox
 import com.miruronative.ui.components.LoadingBox
 import com.miruronative.ui.components.PullRefreshContainer
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -91,123 +97,29 @@ fun SearchScreen(
 ) {
     val state by vm.state.collectAsState()
     val isRefreshing by vm.isRefreshing.collectAsState()
+    val isLoadingMore by vm.isLoadingMore.collectAsState()
     val options by vm.options.collectAsState()
     val device = LocalAppDeviceProfile.current
-    val keyboard = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
+    val gridState = rememberLazyGridState()
     var showFilters by remember { mutableStateOf(false) }
+    // Reveal the search + categories bar when the grid is at the top or being dragged upward,
+    // and tuck it away while scrolling down so results get the full screen height. TV keeps the
+    // bar pinned so D-pad focus can always return to the search field.
+    val scrollingUp = gridState.isScrollingUp()
+    val topBarVisible = device.isTv || scrollingUp
 
-    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Surface(
-            modifier = Modifier.statusBarsPadding(),
-            color = MaterialTheme.colorScheme.background,
-            tonalElevation = 0.dp,
-        ) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = device.pagePadding, vertical = 12.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Browse", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                        Text(
-                            "Find your next obsession",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    TextButton(onClick = vm::clearAll) { Text("Reset") }
-                }
-
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TvDeferredTextField(Modifier.weight(1f).widthIn(min = 0.dp, max = 720.dp)) { fieldModifier ->
-                        OutlinedTextField(
-                            value = vm.query,
-                            onValueChange = vm::onQueryChange,
-                            modifier = fieldModifier
-                                .fillMaxWidth()
-                                // TV: the text field consumes D-pad Down for cursor handling, so
-                                // focus can never escape into the results. Hand it off manually.
-                                .onPreviewKeyEvent { event ->
-                                    if (device.isTv &&
-                                        event.type == KeyEventType.KeyDown &&
-                                        event.key == Key.DirectionDown
-                                    ) {
-                                        keyboard?.hide()
-                                        focusManager.moveFocus(FocusDirection.Down)
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                },
-                            placeholder = { Text("Search anime…") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                            trailingIcon = {
-                                if (vm.query.isNotEmpty()) {
-                                    IconButton(onClick = { vm.onQueryChange("") }, modifier = Modifier.size(40.dp)) {
-                                        Icon(Icons.Default.Close, contentDescription = "Clear search")
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(onSearch = {
-                                keyboard?.hide()
-                                focusManager.moveFocus(FocusDirection.Down)
-                            }),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                            ),
-                        )
-                    }
-                    Button(
-                        onClick = { showFilters = true },
-                        contentPadding = PaddingValues(horizontal = 13.dp),
-                        modifier = Modifier.height(56.dp).focusHighlight(RoundedCornerShape(10.dp)),
-                        shape = RoundedCornerShape(10.dp),
-                    ) {
-                        Icon(Icons.Default.FilterList, contentDescription = "Open filters")
-                        if (vm.filters.activeCount > 0) {
-                            Text(" ${vm.filters.activeCount}", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                Text(
-                    "Categories",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(top = 14.dp, bottom = 2.dp),
-                )
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth().focusGroup(),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    item(key = "format-movie") {
-                        FilterChip(
-                            selected = vm.filters.format == "MOVIE",
-                            onClick = { vm.setFormat(if (vm.filters.format == "MOVIE") null else "MOVIE") },
-                            label = { Text("Movies") },
-                        )
-                    }
-                    items(options.genres.take(14), key = { it }) { genre ->
-                        FilterChip(
-                            selected = genre in vm.filters.genres,
-                            onClick = { vm.toggleGenre(genre) },
-                            label = { Text(genre) },
-                        )
-                    }
-                }
+    Column(
+        modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        AnimatedVisibility(visible = topBarVisible) {
+            Column {
+                SearchTopBar(vm = vm, options = options, onOpenFilters = { showFilters = true })
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .7f))
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .7f))
         Box(Modifier.fillMaxWidth().weight(1f)) {
             when (val current = state) {
                 is UiState.Loading -> LoadingBox()
@@ -217,7 +129,14 @@ fun SearchScreen(
                     onRefresh = vm::refresh,
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    ResultsGrid(current.data, vm.filters, onAnimeClick)
+                    ResultsGrid(
+                        results = current.data,
+                        filters = vm.filters,
+                        onAnimeClick = onAnimeClick,
+                        gridState = gridState,
+                        isLoadingMore = isLoadingMore,
+                        onLoadMore = vm::loadMore,
+                    )
                 }
             }
         }
@@ -233,8 +152,135 @@ fun SearchScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ResultsGrid(results: List<Media>, filters: DiscoverFilters, onAnimeClick: (Int) -> Unit) {
+private fun SearchTopBar(
+    vm: SearchViewModel,
+    options: DiscoverOptions,
+    onOpenFilters: () -> Unit,
+) {
+    val device = LocalAppDeviceProfile.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    Surface(
+        color = MaterialTheme.colorScheme.background,
+        tonalElevation = 0.dp,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = device.pagePadding, vertical = 12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Browse", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                    Text(
+                        "Find your next obsession",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = vm::clearAll) { Text("Reset") }
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TvDeferredTextField(Modifier.weight(1f).widthIn(min = 0.dp, max = 720.dp)) { fieldModifier ->
+                    OutlinedTextField(
+                        value = vm.query,
+                        onValueChange = vm::onQueryChange,
+                        modifier = fieldModifier
+                            .fillMaxWidth()
+                            // TV: the text field consumes D-pad Down for cursor handling, so
+                            // focus can never escape into the results. Hand it off manually.
+                            .onPreviewKeyEvent { event ->
+                                if (device.isTv &&
+                                    event.type == KeyEventType.KeyDown &&
+                                    event.key == Key.DirectionDown
+                                ) {
+                                    keyboard?.hide()
+                                    focusManager.moveFocus(FocusDirection.Down)
+                                    true
+                                } else {
+                                    false
+                                }
+                            },
+                        placeholder = { Text("Search anime…") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (vm.query.isNotEmpty()) {
+                                IconButton(onClick = { vm.onQueryChange("") }, modifier = Modifier.size(40.dp)) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear search")
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            keyboard?.hide()
+                            focusManager.moveFocus(FocusDirection.Down)
+                        }),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        ),
+                    )
+                }
+                Button(
+                    onClick = onOpenFilters,
+                    contentPadding = PaddingValues(horizontal = 13.dp),
+                    modifier = Modifier.height(56.dp).focusHighlight(RoundedCornerShape(10.dp)),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Icon(Icons.Default.FilterList, contentDescription = "Open filters")
+                    if (vm.filters.activeCount > 0) {
+                        Text(" ${vm.filters.activeCount}", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            Text(
+                "Categories",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 14.dp, bottom = 2.dp),
+            )
+            LazyRow(
+                modifier = Modifier.fillMaxWidth().focusGroup(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                item(key = "format-movie") {
+                    FilterChip(
+                        selected = vm.filters.format == "MOVIE",
+                        onClick = { vm.setFormat(if (vm.filters.format == "MOVIE") null else "MOVIE") },
+                        label = { Text("Movies") },
+                    )
+                }
+                items(options.genres.take(14), key = { it }) { genre ->
+                    FilterChip(
+                        selected = genre in vm.filters.genres,
+                        onClick = { vm.toggleGenre(genre) },
+                        label = { Text(genre) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResultsGrid(
+    results: List<Media>,
+    filters: DiscoverFilters,
+    onAnimeClick: (Int) -> Unit,
+    gridState: LazyGridState,
+    isLoadingMore: Boolean,
+    onLoadMore: () -> Unit,
+) {
     val device = LocalAppDeviceProfile.current
     val tileMinWidth = if (device.isTv) 118.dp else device.gridMinWidth
     if (results.isEmpty()) {
@@ -251,7 +297,6 @@ private fun ResultsGrid(results: List<Media>, filters: DiscoverFilters, onAnimeC
         }
         return
     }
-    val gridState = rememberLazyGridState()
     var focusedResultIndex by remember(results) { mutableStateOf<Int?>(null) }
     val horizontalSpacing = if (device.isTv) 14.dp else 9.dp
 
@@ -271,6 +316,13 @@ private fun ResultsGrid(results: List<Media>, filters: DiscoverFilters, onAnimeC
                 // detached title and metadata strip above it.
                 gridState.scrollToItem(rowStart + 1)
             }
+        }
+
+        val lastVisibleIndex by remember(gridState) {
+            derivedStateOf { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
+        }
+        LaunchedEffect(lastVisibleIndex, results.size, columnCount) {
+            if (lastVisibleIndex >= results.size - columnCount * 2) onLoadMore()
         }
 
         LazyVerticalGrid(
@@ -313,6 +365,13 @@ private fun ResultsGrid(results: List<Media>, filters: DiscoverFilters, onAnimeC
                     },
                 )
             }
+            if (isLoadingMore) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+                    }
+                }
+            }
         }
     }
 }
@@ -327,6 +386,31 @@ private fun adaptiveColumnCount(
     return ((contentWidth.value + spacing.value) / (minimumTileWidth.value + spacing.value))
         .toInt()
         .coerceAtLeast(1)
+}
+
+/**
+ * True while the grid is resting at the top or the user is dragging it back upward — the cue for
+ * showing the search bar. Flips to false the moment scrolling moves downward so the bar hides.
+ */
+@Composable
+private fun LazyGridState.isScrollingUp(): Boolean {
+    var lastRealDirectionWasUp by remember(this) { mutableStateOf(true) }
+    val atTop by remember(this) {
+        derivedStateOf { firstVisibleItemIndex == 0 && firstVisibleItemScrollOffset == 0 }
+    }
+    LaunchedEffect(this) {
+        var previousIndex = firstVisibleItemIndex
+        var previousOffset = firstVisibleItemScrollOffset
+        snapshotFlow { firstVisibleItemIndex to firstVisibleItemScrollOffset }
+            .distinctUntilChanged()
+            .collect { (index, offset) ->
+                lastRealDirectionWasUp = index < previousIndex ||
+                    (index == previousIndex && offset < previousOffset)
+                previousIndex = index
+                previousOffset = offset
+            }
+        }
+    return atTop || lastRealDirectionWasUp
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)

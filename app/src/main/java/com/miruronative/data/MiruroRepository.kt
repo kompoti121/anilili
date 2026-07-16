@@ -7,8 +7,10 @@ import com.miruronative.data.model.EpisodesResult
 import com.miruronative.data.model.DiscoverFilters
 import com.miruronative.data.model.Media
 import com.miruronative.data.model.MediaPage
+import com.miruronative.data.model.HomeCollections
 import com.miruronative.data.model.SourcesResult
 import com.miruronative.data.cache.AppCache
+import com.miruronative.data.auth.AuthManager
 import com.miruronative.data.model.DiscoverOptions
 import com.miruronative.data.model.SkipTimes
 import com.miruronative.data.remote.AniListClient
@@ -69,6 +71,24 @@ class MiruroRepository(
     private val seriesFetchGate = Semaphore(SERIES_FETCH_CONCURRENCY)
 
     // ---- discovery (AniList) ----
+    suspend fun homeCollections(force: Boolean = false): HomeCollections {
+        val adultHidden = hideAdult
+        val collections = cache.getOrFetch(
+            key = "home:v1:${if (adultHidden) "sfw" else "all"}",
+            serializer = HomeCollections.serializer(),
+            ttlMs = HOME_TTL,
+            forceRefresh = force,
+        ) { aniList.homeCollections(adultHidden) }
+        if (!adultHidden) return collections
+        return collections.copy(
+            spotlight = collections.spotlight.filterNot { it.isAdult },
+            newest = collections.newest.filterNot { it.isAdult },
+            popular = collections.popular.filterNot { it.isAdult },
+            movies = collections.movies.filterNot { it.isAdult },
+            topRated = collections.topRated.filterNot { it.isAdult },
+        )
+    }
+
     suspend fun trending(page: Int = 1, force: Boolean = false): MediaPage = mediaPage("trending:$page", COLLECTION_TTL, force) {
         aniList.collection("TRENDING_DESC", page = page, perPage = 30, hideAdult = hideAdult)
     }
@@ -92,7 +112,7 @@ class MiruroRepository(
         val zone = java.time.ZoneId.systemDefault()
         val day = java.time.LocalDate.now(zone).plusDays(dayOffset.toLong())
         val start = day.atStartOfDay(zone).toEpochSecond()
-        val end = day.plusDays(1).atStartOfDay(zone).toEpochSecond() - 1
+        val end = day.plusDays(1).atStartOfDay(zone).toEpochSecond()
         // Cached unfiltered and filtered at read time, so toggling the setting applies instantly.
         val schedules = cache.getOrFetch(
             key = "schedule:$day",
@@ -109,20 +129,27 @@ class MiruroRepository(
     suspend fun discover(filters: DiscoverFilters, page: Int = 1, force: Boolean = false): MediaPage =
         mediaPage("discover:${filters.cacheKey()}:$page", COLLECTION_TTL, force) { aniList.discover(filters, page, hideAdult = hideAdult) }
 
-    suspend fun discoverOptions(): DiscoverOptions = cache.getOrFetch(
-        key = "discover-options",
-        serializer = DiscoverOptions.serializer(),
-        ttlMs = OPTIONS_TTL,
-    ) { aniList.discoverOptions() }
+    suspend fun discoverOptions(): DiscoverOptions {
+        val adultHidden = hideAdult
+        return cache.getOrFetch(
+            key = "discover-options:${if (adultHidden) "sfw" else "all"}",
+            serializer = DiscoverOptions.serializer(),
+            ttlMs = OPTIONS_TTL,
+        ) { aniList.discoverOptions(adultHidden) }
+    }
 
     // ---- authenticated (AniList login) ----
     suspend fun viewer() = aniList.viewer()
     suspend fun notifications(markAllRead: Boolean = false) = aniList.notifications(markAllRead)
     suspend fun favouriteAnime() = aniList.favouriteAnime()
     suspend fun userAnimeList(userId: Int) = aniList.userAnimeList(userId)
-    suspend fun saveAniListProgress(mediaId: Int, progress: Int, completed: Boolean = false) =
-        aniList.saveMediaListEntry(mediaId, if (completed) "COMPLETED" else "CURRENT", progress)
+    suspend fun saveAniListProgress(mediaId: Int, progress: Int, totalEpisodes: Int?) =
+        aniList.syncMediaListProgress(mediaId, progress, totalEpisodes)
     suspend fun syncSavedAnime(mediaId: Int, saved: Boolean) = aniList.syncSavedAnime(mediaId, saved)
+    suspend fun syncSavedAnime(mediaIds: Collection<Int>) {
+        val viewerId = AuthManager.viewerId() ?: aniList.viewer()?.id ?: return
+        aniList.syncSavedAnime(mediaIds, viewerId)
+    }
 
     /** MAL filler episode numbers via Jikan; cached a week, empty on failure or no MAL id. */
     suspend fun fillerEpisodes(malId: Int?): Set<Int> {
@@ -360,6 +387,7 @@ class MiruroRepository(
         const val MAX_SERIES_DEPTH = 8
         const val SERIES_FETCH_CONCURRENCY = 2
         const val SCHEDULE_TTL = 15L * 60 * 1000
+        const val HOME_TTL = 30L * 60 * 1000
         const val SEARCH_TTL = 30L * 60 * 1000
         const val AIRING_TTL = 30L * 60 * 1000
         const val COLLECTION_TTL = 4L * 60 * 60 * 1000
