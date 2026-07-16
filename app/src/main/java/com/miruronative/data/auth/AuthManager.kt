@@ -52,9 +52,10 @@ object AuthManager {
         val state = ByteArray(24).also(SecureRandom()::nextBytes)
             .let { Base64.encodeToString(it, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING) }
         pendingOAuthState = state
+        // AniList's implicit flow uses the redirect registered for the client. Supplying the same
+        // redirect explicitly currently makes its post-login grant step fail with unsupported_grant_type.
         return Uri.parse(AUTHORIZE_ENDPOINT).buildUpon()
             .appendQueryParameter("client_id", CLIENT_ID)
-            .appendQueryParameter("redirect_uri", REDIRECT)
             .appendQueryParameter("response_type", "token")
             .appendQueryParameter("state", state)
             .build()
