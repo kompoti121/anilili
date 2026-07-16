@@ -21,14 +21,21 @@ object Routes {
 
     // Watch is addressed by anilistId + provider + category + episode number; the episode list
     // (and each episode's raw pipe id) is pulled from the repository's cache on arrival.
-    const val WATCH = "watch/{id}/{provider}/{category}/{episode}"
+    const val WATCH = "watch/{id}/{provider}/{category}/{episode}?showEpisodes={showEpisodes}"
     fun watch(id: Int, provider: String, category: String, episode: String) =
         "watch/$id/$provider/$category/${Uri.encode(episode)}"
+
+    /** Season selection opens the Watch destination with its episode grid visible on TV. */
+    fun episodes(id: Int, provider: String, category: String, episode: String) =
+        withEpisodeList(watch(id, provider, category, episode))
+
+    internal fun withEpisodeList(watchRoute: String): String = "$watchRoute?showEpisodes=true"
 
     object Arg {
         const val ID = "id"
         const val PROVIDER = "provider"
         const val CATEGORY = "category"
         const val EPISODE = "episode"
+        const val SHOW_EPISODES = "showEpisodes"
     }
 }

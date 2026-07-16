@@ -46,6 +46,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -83,6 +84,7 @@ fun WatchScreen(
     provider: String,
     category: String,
     episode: String,
+    showEpisodeListInitially: Boolean = false,
     inPictureInPicture: Boolean = false,
     onBack: () -> Unit,
     vm: WatchViewModel = viewModel(),
@@ -96,7 +98,9 @@ fun WatchScreen(
     val device = LocalAppDeviceProfile.current
     var webFallback by remember { mutableStateOf(false) }
     // TV plays fullscreen from the start; Back drops to the episode/source screen.
-    var fullscreen by remember { mutableStateOf(device.isTv) }
+    var fullscreen by remember(animeId, showEpisodeListInitially, device.isTv) {
+        mutableStateOf(device.isTv && !showEpisodeListInitially)
+    }
     val activity = remember(context) { context.findActivity() }
     val currentOnBack by rememberUpdatedState(onBack)
     val pauseAndBack = remember {
@@ -221,6 +225,7 @@ fun WatchScreen(
                 onPrev = vm::prev,
                 onNext = vm::next,
                 onChangeSource = vm::changeSource,
+                onChangeCategory = vm::changeCategory,
                 onSelectEpisode = { index ->
                     if (device.isTv) fullscreen = true
                     vm.playIndex(index)
@@ -243,12 +248,13 @@ private fun WatchContent(
     onPrev: () -> Unit,
     onNext: () -> Unit,
     onChangeSource: (String, String) -> Unit,
+    onChangeCategory: (String) -> Unit,
     onSelectEpisode: (Int) -> Unit,
     onWebFallback: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onFullscreenChanged: (Boolean) -> Unit,
     onProgress: (Long, Long) -> Unit,
-    onPlaybackError: (String) -> Unit,
+    onPlaybackError: (String, String, Long) -> Unit,
 ) {
     val device = LocalAppDeviceProfile.current
     val configuration = LocalConfiguration.current
@@ -257,7 +263,13 @@ private fun WatchContent(
     // TV: leaving fullscreen must hand focus to the episode/source area — otherwise it can
     // stay inside the player (or an embed WebView) and the D-pad never reaches the list.
     LaunchedEffect(fullscreen) {
-        if (device.isTv && !fullscreen) runCatching { listFocus.requestFocus() }
+        if (device.isTv && !fullscreen) {
+            // Wait until the non-fullscreen controls have been measured before requesting focus.
+            delay(120)
+            runCatching { listFocus.requestFocus() }
+                .onSuccess { DiagnosticsLog.event("Watch TV selector focus requested") }
+                .onFailure { DiagnosticsLog.throwable("Watch TV selector focus failed", it) }
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -279,71 +291,76 @@ private fun WatchContent(
         }
         Box(playerModifier.background(Color.Black)) {
             val stream = data.chosenStream
-            when {
-                stream == null -> NoSource(onWebFallback)
-                stream.isEmbed || ProviderCatalog.isEmbed(data.provider) ->
-                    Box(Modifier.fillMaxSize()) {
-                        LaunchedEffect(stream.url) { PlaybackService.stopActivePlayback() }
-                        EmbedEpisodeNavigationEffect(
-                            hasPrevious = data.hasPrev,
-                            hasNext = data.hasNext,
-                            onPrevious = onPrev,
-                            onNext = onNext,
-                        )
-                        EmbedWebView(
-                            url = stream.url,
-                            referer = stream.referer,
-                            modifier = Modifier.fillMaxSize(),
-                            qualityStreams = data.sources.embedStreams,
-                            startPositionMs = data.startPositionMs,
-                            skip = data.sources.skip,
-                            onPreviousEpisode = onPrev,
-                            onNextEpisode = onNext,
-                            hasPreviousEpisode = data.hasPrev,
-                            hasNextEpisode = data.hasNext,
-                            onFullscreenChanged = onFullscreenChanged,
-                            onProgress = onProgress,
-                        )
-                        // Embed players often use CSS "web fullscreen" that never reaches the
-                        // WebView fullscreen callback, so the app provides its own toggle.
-                        IconButton(
-                            onClick = onToggleFullscreen,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(4.dp)
-                                .focusHighlight(RoundedCornerShape(24.dp)),
-                        ) {
-                            Icon(
-                                if (fullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                                contentDescription = if (fullscreen) "Exit fullscreen" else "Fullscreen",
-                                tint = Color.White.copy(alpha = 0.85f),
+            key(data.provider, data.category, data.current.number, stream?.url, data.playbackGeneration) {
+                when {
+                    stream == null -> NoSource(onWebFallback)
+                    stream.isEmbed || ProviderCatalog.isEmbed(data.provider) ->
+                        Box(Modifier.fillMaxSize()) {
+                            LaunchedEffect(stream.url) { PlaybackService.stopActivePlayback() }
+                            EmbedEpisodeNavigationEffect(
+                                hasPrevious = data.hasPrev,
+                                hasNext = data.hasNext,
+                                onPrevious = onPrev,
+                                onNext = onNext,
                             )
+                            EmbedWebView(
+                                url = stream.url,
+                                referer = stream.referer,
+                                modifier = Modifier.fillMaxSize(),
+                                qualityStreams = data.sources.embedStreams,
+                                startPositionMs = data.startPositionMs,
+                                skip = data.sources.skip,
+                                onPreviousEpisode = onPrev,
+                                onNextEpisode = onNext,
+                                hasPreviousEpisode = data.hasPrev,
+                                hasNextEpisode = data.hasNext,
+                                focusPlayerOnStart = fullscreen,
+                                onFullscreenChanged = onFullscreenChanged,
+                                onProgress = onProgress,
+                                onPlaybackError = onPlaybackError.takeIf { data.provider == "allanime" },
+                            )
+                            // Embed players often use CSS "web fullscreen" that never reaches the
+                            // WebView fullscreen callback, so the app provides its own toggle.
+                            IconButton(
+                                onClick = onToggleFullscreen,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(4.dp)
+                                    .focusHighlight(RoundedCornerShape(24.dp)),
+                            ) {
+                                Icon(
+                                    if (fullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                    contentDescription = if (fullscreen) "Exit fullscreen" else "Fullscreen",
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                )
+                            }
                         }
-                    }
-                else -> PlayerSurface(
-                    stream = stream,
-                    qualityStreams = data.sources.streams.filterNot(StreamItem::isEmbed),
-                    subtitles = data.sources.subtitles,
-                    skip = data.sources.skip,
-                    seriesTitle = data.seriesTitle,
-                    episodeTitle = "Episode ${data.current.displayNumber}" +
-                        (data.current.title?.let { ": $it" } ?: ""),
-                    artworkUrl = data.artworkUrl,
-                    animeId = data.anilistId,
-                    provider = data.provider,
-                    category = data.category.api,
-                    episode = data.current.displayNumber,
-                    onEnded = { if (com.miruronative.data.settings.SettingsStore.autoplay.value) onNext() },
-                    onNextEpisode = onNext,
-                    onError = onPlaybackError,
-                    modifier = Modifier.fillMaxSize(),
-                    onToggleFullscreen = onToggleFullscreen,
-                    startPositionMs = data.startPositionMs,
-                    onProgress = onProgress,
-                    onPreviousEpisode = onPrev,
-                    hasNextEpisode = data.hasNext,
-                    hasPreviousEpisode = data.hasPrev,
-                )
+                    else -> PlayerSurface(
+                        stream = stream,
+                        qualityStreams = data.sources.streams.filterNot(StreamItem::isEmbed),
+                        subtitles = data.sources.subtitles,
+                        skip = data.sources.skip,
+                        seriesTitle = data.seriesTitle,
+                        episodeTitle = "Episode ${data.current.displayNumber}" +
+                            (data.current.title?.let { ": $it" } ?: ""),
+                        artworkUrl = data.artworkUrl,
+                        animeId = data.anilistId,
+                        provider = data.provider,
+                        category = data.category.api,
+                        episode = data.current.displayNumber,
+                        onEnded = { if (com.miruronative.data.settings.SettingsStore.autoplay.value) onNext() },
+                        onNextEpisode = onNext,
+                        onError = onPlaybackError,
+                        modifier = Modifier.fillMaxSize(),
+                        onToggleFullscreen = onToggleFullscreen,
+                        startPositionMs = data.startPositionMs,
+                        onProgress = onProgress,
+                        onPreviousEpisode = onPrev,
+                        hasNextEpisode = data.hasNext,
+                        hasPreviousEpisode = data.hasPrev,
+                        focusPlayerOnStart = fullscreen,
+                    )
+                }
             }
             if (data.isResolving) {
                 Box(
@@ -394,6 +411,7 @@ private fun WatchContent(
                 SourceSelectors(
                     data = data,
                     onChangeSource = onChangeSource,
+                    onChangeCategory = onChangeCategory,
                     focusRequester = listFocus,
                 )
                 data.notice?.let { notice ->
@@ -430,11 +448,12 @@ private fun WatchContent(
     }
 }
 
-/** Compact Server + Audio (sub/dub) dropdowns on one line, replacing the combined source list. */
+/** Compact server and audio selectors. Choosing a server also makes it the global preference. */
 @Composable
 private fun SourceSelectors(
     data: WatchData,
     onChangeSource: (String, String) -> Unit,
+    onChangeCategory: (String) -> Unit,
     focusRequester: FocusRequester,
 ) {
     val device = LocalAppDeviceProfile.current
@@ -459,7 +478,8 @@ private fun SourceSelectors(
     ) {
         // Server also carries the TV focus anchor for leaving fullscreen.
         CompactClickablePill(
-            label = ProviderCatalog.label(data.provider),
+            label = ProviderCatalog.label(data.provider) +
+                if (data.provider == data.preferredProvider) " ★" else "",
             enabled = servers.isNotEmpty(),
             focusRequester = focusRequester,
             onClick = { showServerDialog = true }
@@ -483,7 +503,7 @@ private fun SourceSelectors(
                     } else null,
                     onClick = {
                         dismiss()
-                        if (!selected) onChangeSource(data.provider, category.api)
+                        if (!selected) onChangeCategory(category.api)
                     },
                 )
             }
@@ -524,23 +544,29 @@ private fun SourceSelectors(
                 Column(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            text = "Select Server",
+                            text = "Select preferred server",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (pendingServers.isEmpty()) "${servers.size} available"
-                                else "${servers.size} ready · checking more…",
+                            text = if (data.preferredProvider == "auto") {
+                                "Choose once; it will be tried first for every anime."
+                            } else {
+                                "Preferred: ${ProviderCatalog.label(data.preferredProvider)} · ${servers.size} available"
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        if (pendingServers.isNotEmpty()) {
+                            Text(
+                                text = "Checking more servers…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
 
                     Column(
@@ -561,6 +587,7 @@ private fun SourceSelectors(
                             ) {
                                 rowCells.forEach { (server, ready) ->
                                     val selected = ready && server == data.provider
+                                    val preferred = ready && server == data.preferredProvider
                                     val bg = when {
                                         selected -> MaterialTheme.colorScheme.primary
                                         ready -> MaterialTheme.colorScheme.surfaceVariant
@@ -576,7 +603,7 @@ private fun SourceSelectors(
                                             .background(bg)
                                             .border(
                                                 1.dp,
-                                                if (selected) MaterialTheme.colorScheme.primary
+                                                if (selected || preferred) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.outline,
                                                 RoundedCornerShape(8.dp)
                                             )
@@ -585,7 +612,7 @@ private fun SourceSelectors(
                                                     Modifier.clickable {
                                                         showServerDialog = false
                                                         if (device.isTv) runCatching { focusRequester.requestFocus() }
-                                                        if (!selected) {
+                                                        if (!selected || !preferred) {
                                                             val options = data.sourceOptions.filter { it.provider == server }
                                                             val category = options.firstOrNull { it.category == data.category }?.category
                                                                 ?: options.first().category
@@ -600,9 +627,9 @@ private fun SourceSelectors(
                                     ) {
                                         if (ready) {
                                             Text(
-                                                text = ProviderCatalog.label(server),
+                                                text = ProviderCatalog.label(server) + if (preferred) " ★" else "",
                                                 style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                                fontWeight = if (selected || preferred) FontWeight.Bold else FontWeight.Normal,
                                                 color = textColor,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,

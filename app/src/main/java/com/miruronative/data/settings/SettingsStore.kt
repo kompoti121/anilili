@@ -34,6 +34,9 @@ enum class MenuLanguage(val storedValue: String) {
     }
 }
 
+/** No global server has been chosen yet; the launch route supplies the initial server. */
+const val DEFAULT_PREFERRED_PROVIDER = "auto"
+
 /** Transactional DataStore preferences shared by playback and the Library settings UI. */
 object SettingsStore {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -66,6 +69,10 @@ object SettingsStore {
     private val _menuLanguage = MutableStateFlow(MenuLanguage.SYSTEM)
     val menuLanguage = _menuLanguage.asStateFlow()
 
+    private val _preferredProvider = MutableStateFlow(DEFAULT_PREFERRED_PROVIDER)
+    val preferredProvider = _preferredProvider.asStateFlow()
+    private val loaded = MutableStateFlow(false)
+
     fun init(context: Context) {
         val app = context.applicationContext
         store = PreferenceDataStoreFactory.create(
@@ -97,6 +104,16 @@ object SettingsStore {
         _menuLanguage.value = value
         scope.launch { store.edit { it[MENU_LANGUAGE] = value.storedValue } }
     }
+    fun setPreferredProvider(value: String) {
+        val storedValue = value.trim().lowercase().ifBlank { DEFAULT_PREFERRED_PROVIDER }
+        _preferredProvider.value = storedValue
+        scope.launch { store.edit { it[PREFERRED_PROVIDER] = storedValue } }
+    }
+
+    /** Guarantees cold-start consumers see the persisted preference instead of the in-memory default. */
+    suspend fun awaitLoaded() {
+        loaded.first { it }
+    }
 
     private fun save(key: Preferences.Key<Boolean>, value: Boolean, state: MutableStateFlow<Boolean>) {
         state.value = value
@@ -113,6 +130,9 @@ object SettingsStore {
         _hideAdultContent.value = prefs[HIDE_ADULT_CONTENT] ?: true
         _subtitlesWithDub.value = prefs[SUBTITLES_WITH_DUB] ?: false
         _menuLanguage.value = MenuLanguage.fromStored(prefs[MENU_LANGUAGE])
+        _preferredProvider.value =
+            prefs[PREFERRED_PROVIDER]?.takeIf(String::isNotBlank) ?: DEFAULT_PREFERRED_PROVIDER
+        loaded.value = true
     }
 
     private suspend fun migrateLegacyPreferences(context: Context) {
@@ -140,5 +160,6 @@ object SettingsStore {
     private val HIDE_ADULT_CONTENT = booleanPreferencesKey("hide_adult_content")
     private val SUBTITLES_WITH_DUB = booleanPreferencesKey("subtitles_with_dub")
     private val MENU_LANGUAGE = stringPreferencesKey("menu_language")
+    private val PREFERRED_PROVIDER = stringPreferencesKey("preferred_provider")
     private val MIGRATED = booleanPreferencesKey("migrated_from_shared_preferences")
 }

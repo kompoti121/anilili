@@ -1,5 +1,6 @@
 package com.miruronative.ui.watch
 
+import android.view.KeyEvent
 import com.miruronative.data.model.SourcesResult
 import com.miruronative.data.model.Category
 import com.miruronative.data.model.EpisodeItem
@@ -7,6 +8,7 @@ import com.miruronative.data.model.EpisodesResult
 import com.miruronative.data.model.ProviderData
 import com.miruronative.data.model.StreamItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -41,6 +43,105 @@ class WatchSourcePolicyTest {
         val hls = stream("https://cdn.example/master.m3u8", "hls", "auto", active = true)
 
         assertEquals(hls, pickProviderStream("bonk", sources(direct, hls)))
+    }
+
+    @Test
+    fun `allanime orders every stream before provider fallback`() {
+        val mp4 = stream("https://files.example/video.mp4", "mp4", "AllAnime 1080p Yt-mp4", active = true)
+        val primaryHls = stream("https://primary.example/master.m3u8", "hls", "AllAnime Ac")
+        val backupHls = stream("https://backup.example/master.m3u8", "hls", "AllAnime Luf-hls")
+        val embed = stream("https://embed.example/e/id", "embed", "AllAnime Ok")
+        val result = sources(mp4, primaryHls, backupHls, embed)
+
+        assertEquals(
+            listOf(primaryHls, backupHls, mp4, embed),
+            providerStreamOrder("allanime", result),
+        )
+    }
+
+    @Test
+    fun `allanime advances through untried streams and stops when exhausted`() {
+        val primaryHls = stream("https://primary.example/master.m3u8", "hls", "AllAnime Ac", active = true)
+        val backupHls = stream("https://backup.example/master.m3u8", "hls", "AllAnime Luf-hls")
+        val mp4 = stream("https://files.example/video.mp4", "mp4", "AllAnime 1080p Yt-mp4")
+        val embed = stream("https://embed.example/e/id", "embed", "AllAnime Ok")
+        val result = sources(primaryHls, backupHls, mp4, embed)
+
+        assertEquals(
+            backupHls,
+            nextProviderStream("allanime", result, primaryHls.url, setOf(primaryHls.url)),
+        )
+        assertEquals(
+            mp4,
+            nextProviderStream("allanime", result, backupHls.url, setOf(primaryHls.url, backupHls.url)),
+        )
+        assertEquals(
+            embed,
+            nextProviderStream("allanime", result, mp4.url, setOf(primaryHls.url, backupHls.url, mp4.url)),
+        )
+        assertNull(
+            nextProviderStream(
+                "allanime",
+                result,
+                embed.url,
+                setOf(primaryHls.url, backupHls.url, mp4.url, embed.url),
+            ),
+        )
+        assertEquals(
+            primaryHls,
+            nextProviderStream(
+                "allanime",
+                sources(primaryHls, backupHls),
+                backupHls.url,
+                setOf(backupHls.url),
+            ),
+        )
+    }
+
+    @Test
+    fun `saved provider overrides each watch route`() {
+        assertEquals("allanime", preferredProviderForWatch("allanime", "bonk"))
+        assertEquals("allanime", preferredProviderForWatch(" AllAnime ", "kiwi"))
+    }
+
+    @Test
+    fun `first watch keeps route provider until user chooses a global provider`() {
+        assertEquals("bonk", preferredProviderForWatch("auto", "bonk"))
+        assertEquals("kiwi", preferredProviderForWatch(null, " Kiwi "))
+    }
+
+    @Test
+    fun `blank watch provider falls back to automatic selection`() {
+        assertEquals("auto", preferredProviderForWatch("auto", " "))
+    }
+
+    @Test
+    fun `tv controls keep progress display out of remote focus order`() {
+        assertEquals(
+            listOf(
+                TvPlayerControl.PREVIOUS,
+                TvPlayerControl.REWIND,
+                TvPlayerControl.PLAY_PAUSE,
+                TvPlayerControl.FORWARD,
+                TvPlayerControl.NEXT,
+                TvPlayerControl.VOLUME_DOWN,
+                TvPlayerControl.MUTE,
+                TvPlayerControl.VOLUME_UP,
+                TvPlayerControl.SETTINGS,
+                TvPlayerControl.FULLSCREEN,
+            ),
+            tvPlayerControlOrder(hasSettings = true, hasFullscreen = true),
+        )
+    }
+
+    @Test
+    fun `direction and confirm keys open tv controls`() {
+        assertTrue(opensTvPlayerControls(KeyEvent.KEYCODE_DPAD_LEFT))
+        assertTrue(opensTvPlayerControls(KeyEvent.KEYCODE_DPAD_RIGHT))
+        assertTrue(opensTvPlayerControls(KeyEvent.KEYCODE_DPAD_UP))
+        assertTrue(opensTvPlayerControls(KeyEvent.KEYCODE_DPAD_DOWN))
+        assertTrue(opensTvPlayerControls(KeyEvent.KEYCODE_DPAD_CENTER))
+        assertEquals(false, opensTvPlayerControls(KeyEvent.KEYCODE_MEDIA_NEXT))
     }
 
     @Test

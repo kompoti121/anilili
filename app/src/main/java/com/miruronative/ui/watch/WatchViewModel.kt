@@ -9,6 +9,7 @@ import com.miruronative.data.library.HistoryEntry
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.auth.AuthManager
 import com.miruronative.data.settings.SettingsStore
+import com.miruronative.data.settings.DEFAULT_PREFERRED_PROVIDER
 import com.miruronative.data.model.Category
 import com.miruronative.data.model.EpisodeItem
 import com.miruronative.data.model.EpisodesResult
@@ -39,6 +40,8 @@ data class WatchData(
     val seriesTitle: String,
     val artworkUrl: String?,
     val startPositionMs: Long = 0,
+    val playbackGeneration: Int = 0,
+    val preferredProvider: String = DEFAULT_PREFERRED_PROVIDER,
     val isResolving: Boolean = false,
     /** The fast Miruro sources are shown; the slower Anivexa servers are still loading in. */
     val isLoadingMoreSources: Boolean = false,
@@ -64,6 +67,7 @@ class WatchViewModel : ViewModel() {
 
     private var anilistId = 0
     private var category = Category.SUB
+    private var globalPreferredProvider = DEFAULT_PREFERRED_PROVIDER
     private var preferred = ""
     private var spine: List<EpisodeItem> = emptyList()
     private var startedKey: String? = null
@@ -73,6 +77,7 @@ class WatchViewModel : ViewModel() {
     private val syncedAniListEpisodes = mutableSetOf<Int>()
     private var lastRequestedNumber = 1.0
     private var failedProviders = mutableSetOf<String>()
+    private val failedStreamUrls = mutableSetOf<String>()
     private var resolveJob: Job? = null
     private var anivexaMergeJob: Job? = null
     private var mergedIncludesAnivexa = false
@@ -99,6 +104,13 @@ class WatchViewModel : ViewModel() {
         resolveJob = viewModelScope.launch {
             _state.value = UiState.Loading
             try {
+                SettingsStore.awaitLoaded()
+                val storedPreferred = SettingsStore.preferredProvider.value
+                globalPreferredProvider = storedPreferred
+                preferred = preferredProviderForWatch(storedPreferred, providerName)
+                DiagnosticsLog.event(
+                    "Watch preferred server route=$providerName stored=$storedPreferred selected=$preferred",
+                )
                 DiagnosticsLog.event("Watch episodes load start id=$id")
                 // Fast path: start from the Miruro pipe alone so playback isn't held behind the
                 // slower multi-provider Anivexa catalog. The Anivexa providers fold in afterwards
@@ -189,6 +201,7 @@ class WatchViewModel : ViewModel() {
     }
 
     private suspend fun resolveAndPlay(number: Double) {
+        failedStreamUrls.clear()
         val requestedProvider = preferred
         DiagnosticsLog.event(
             "Watch resolve start id=$anilistId episode=${fmt(number)} preferred=$requestedProvider " +
@@ -232,7 +245,6 @@ class WatchViewModel : ViewModel() {
                     "episode=${fmt(number)}",
             )
         }
-        preferred = resolved.provider // stick with whatever actually served the stream
         val sources = if (resolved.sources.skip == null) {
             val fallbackSkip = withTimeoutOrNull(ANISKIP_WAIT_MS) { aniSkipFallback.await() }
             fallbackSkip?.let { resolved.sources.copy(skip = it) } ?: resolved.sources
@@ -242,7 +254,7 @@ class WatchViewModel : ViewModel() {
         }
         val index = spine.indexOfFirst { it.number == number }.coerceAtLeast(0)
         val resume = LibraryStore.historyFor(anilistId)?.takeIf { it.episodeNumber == number }?.positionMs ?: 0L
-        val chosen = pickProviderStream(resolved.provider, resolved.sources)
+        val chosen = pickProviderStream(resolved.provider, sources)
         DiagnosticsLog.event(
             "Watch resolve success provider=${resolved.provider} episode=${fmt(number)} index=$index " +
                 "hls=${resolved.sources.hlsStreams.size} total=${resolved.sources.streams.size} " +
@@ -268,6 +280,7 @@ class WatchViewModel : ViewModel() {
                 seriesTitle = seriesTitle,
                 artworkUrl = artworkUrl,
                 startPositionMs = resume,
+                preferredProvider = globalPreferredProvider,
                 isResolving = false,
                 isLoadingMoreSources = !mergedIncludesAnivexa,
                 notice = fallbackNotice,
@@ -278,15 +291,53 @@ class WatchViewModel : ViewModel() {
 
     fun changeSource(providerName: String, categoryApi: String) {
         DiagnosticsLog.event("Watch changeSource requested provider=$providerName category=$categoryApi")
+        switchSource(providerName, categoryApi, rememberProvider = true)
+    }
+
+    fun changeCategory(categoryApi: String) {
+        val providerName = (_state.value as? UiState.Success)?.data?.provider ?: return
+        DiagnosticsLog.event("Watch changeCategory requested provider=$providerName category=$categoryApi")
+        switchSource(providerName, categoryApi, rememberProvider = false)
+    }
+
+    private fun switchSource(providerName: String, categoryApi: String, rememberProvider: Boolean) {
         val nextCategory = Category.from(categoryApi)
         val provider = mergedEpisodes.provider(providerName) ?: return
         val nextSpine = provider.episodes(nextCategory).takeIf { it.isNotEmpty() } ?: return
-        val currentNumber = (_state.value as? UiState.Success)?.data?.current?.number ?: lastRequestedNumber
+        val current = (_state.value as? UiState.Success)?.data
+        val currentNumber = current?.current?.number ?: lastRequestedNumber
 
-        preferred = providerName
+        if (rememberProvider) {
+            preferred = providerName
+            globalPreferredProvider = providerName
+            SettingsStore.setPreferredProvider(providerName)
+        }
+        if (current?.provider == providerName && current.category == nextCategory) {
+            if (rememberProvider) {
+                _state.value = UiState.Success(
+                    current.copy(
+                        preferredProvider = providerName,
+                        notice = "${ProviderCatalog.label(providerName)} is now your preferred server.",
+                    ),
+                )
+            }
+            return
+        }
         category = nextCategory
         spine = nextSpine
         failedProviders.clear()
+        if (current != null) {
+            _state.value = UiState.Success(
+                current.copy(
+                    preferredProvider = globalPreferredProvider,
+                    notice = if (rememberProvider) {
+                        "${ProviderCatalog.label(providerName)} is now your preferred server."
+                    } else {
+                        current.notice
+                    },
+                ),
+            )
+        }
         launchResolve(nextSpine.firstOrNull { it.number == currentNumber }?.number ?: nextSpine.first().number)
     }
 
@@ -378,13 +429,48 @@ class WatchViewModel : ViewModel() {
         }
     }
 
-    fun onPlaybackError(message: String) {
+    fun onPlaybackError(message: String, streamUrl: String, positionMs: Long) {
         val data = (_state.value as? UiState.Success)?.data ?: return
         if (data.isResolving) return
         DiagnosticsLog.event(
             "Watch playback error provider=${data.provider} episode=${data.current.displayNumber} " +
-                "message=${message.take(160)}",
+                "streamHost=${runCatching { Uri.parse(streamUrl).host }.getOrNull() ?: "unknown"} " +
+                "positionMs=$positionMs message=${message.take(160)}",
         )
+
+        if (data.provider == "allanime" && streamUrl.isNotBlank()) {
+            if (!failedStreamUrls.add(streamUrl)) {
+                DiagnosticsLog.event("Watch ignored duplicate AllAnime stream failure host=${Uri.parse(streamUrl).host}")
+                return
+            }
+            val next = nextProviderStream(
+                provider = data.provider,
+                sources = data.sources,
+                currentUrl = streamUrl,
+                failedUrls = failedStreamUrls,
+            )
+            if (next != null) {
+                val failed = data.sources.streams.firstOrNull { it.url == streamUrl }
+                val resume = maxOf(data.startPositionMs, positionMs.coerceAtLeast(0L))
+                DiagnosticsLog.event(
+                    "Watch AllAnime internal fallback failed=${failed?.diagnosticLabel() ?: "unknown"} " +
+                        "next=${next.diagnosticLabel()} attempted=${failedStreamUrls.size} resumeMs=$resume",
+                )
+                _state.value = UiState.Success(
+                    data.copy(
+                        chosenStream = next,
+                        startPositionMs = resume,
+                        playbackGeneration = data.playbackGeneration + 1,
+                        notice = "${failed?.label ?: "AllAnime source"} failed. Trying ${next.label}…",
+                    ),
+                )
+                return
+            }
+            DiagnosticsLog.event(
+                "Watch AllAnime streams exhausted attempted=${failedStreamUrls.size}; trying another provider",
+            )
+        }
+
         failedProviders += data.provider
         launchResolve(data.current.number) {
             _state.value = UiState.Success(
@@ -459,6 +545,46 @@ internal fun pickProviderStream(provider: String, sources: SourcesResult): Strea
             ?: embeds.firstOrNull()
             ?: sources.streams.firstOrNull()
     }
+}
+
+/** Every distinct stream in the same order the provider's first-player policy would choose it. */
+internal fun providerStreamOrder(
+    provider: String,
+    sources: SourcesResult,
+): List<StreamItem> {
+    val remaining = sources.streams.distinctBy(StreamItem::url).toMutableList()
+    return buildList {
+        while (remaining.isNotEmpty()) {
+            val next = pickProviderStream(provider, sources.copy(streams = remaining)) ?: break
+            add(next)
+            remaining.removeAll { it.url == next.url }
+        }
+    }
+}
+
+/** Finds the next untried stream after the one that failed, wrapping once before giving up. */
+internal fun nextProviderStream(
+    provider: String,
+    sources: SourcesResult,
+    currentUrl: String,
+    failedUrls: Set<String>,
+): StreamItem? {
+    val ordered = providerStreamOrder(provider, sources)
+    if (ordered.isEmpty()) return null
+    val currentIndex = ordered.indexOfFirst { it.url == currentUrl }
+    val candidates = if (currentIndex >= 0) {
+        ordered.drop(currentIndex + 1) + ordered.take(currentIndex)
+    } else {
+        ordered
+    }
+    return candidates.firstOrNull { it.url !in failedUrls }
+}
+
+/** A saved global choice wins; before the first explicit choice, keep the launch route behavior. */
+internal fun preferredProviderForWatch(storedPreferred: String?, routeProvider: String): String {
+    val stored = storedPreferred?.trim()?.lowercase().orEmpty()
+    if (stored.isNotBlank() && stored != DEFAULT_PREFERRED_PROVIDER) return stored
+    return routeProvider.trim().lowercase().ifBlank { DEFAULT_PREFERRED_PROVIDER }
 }
 
 private fun bestHls(streams: List<StreamItem>): StreamItem? = streams

@@ -3,11 +3,11 @@ package com.miruronative.ui.watch
 import android.content.ComponentName
 import android.net.Uri
 import android.os.Bundle
-import android.view.KeyEvent
 import android.view.View
 import androidx.annotation.OptIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,7 +39,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -210,7 +216,7 @@ fun PlayerSurface(
     episode: String,
     onEnded: () -> Unit,
     onNextEpisode: () -> Unit = onEnded,
-    onError: (String) -> Unit,
+    onError: (String, String, Long) -> Unit,
     modifier: Modifier = Modifier,
     onToggleFullscreen: (() -> Unit)? = null,
     startPositionMs: Long = 0,
@@ -218,6 +224,7 @@ fun PlayerSurface(
     onPreviousEpisode: (() -> Unit)? = null,
     hasNextEpisode: Boolean = true,
     hasPreviousEpisode: Boolean = true,
+    focusPlayerOnStart: Boolean = true,
 ) {
     val context = LocalContext.current
     val device = LocalAppDeviceProfile.current
@@ -228,8 +235,10 @@ fun PlayerSurface(
     var controller by remember { mutableStateOf<MediaController?>(null) }
     val currentProvider by rememberUpdatedState(provider)
     val currentCategory by rememberUpdatedState(category)
+    val currentOnError by rememberUpdatedState(onError)
     var activeStream by remember(stream.url) { mutableStateOf(stream) }
     var nextStartPositionMs by remember(stream.url) { mutableLongStateOf(startPositionMs) }
+    var playbackIsPlaying by remember { mutableStateOf(false) }
     val nativeQualityStreams = remember(stream.url, qualityStreams) {
         (listOf(stream) + qualityStreams)
             .filterNot(StreamItem::isEmbed)
@@ -269,6 +278,7 @@ fun PlayerSurface(
         if (activeController == null) {
             onDispose { }
         } else {
+            playbackIsPlaying = activeController.isPlaying
             val listener = object : Player.Listener {
                 private var audioPreferenceAppliedFor: String? = null
 
@@ -281,12 +291,17 @@ fun PlayerSurface(
                 }
 
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    playbackIsPlaying = isPlaying
                     DiagnosticsLog.event("PlayerSurface isPlaying=$isPlaying")
                 }
 
                 override fun onPlayerError(error: PlaybackException) {
                     DiagnosticsLog.throwable("PlayerSurface player error code=${error.errorCodeName}", error)
-                    onError(error.localizedMessage ?: "Playback failed")
+                    currentOnError(
+                        error.localizedMessage ?: "Playback failed",
+                        activeController.currentMediaItem?.mediaId.orEmpty(),
+                        activeController.currentPosition.coerceAtLeast(0L),
+                    )
                 }
 
                 override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
@@ -366,12 +381,14 @@ fun PlayerSurface(
     }
 
     var positionMs by remember { mutableLongStateOf(0L) }
+    var durationMs by remember { mutableLongStateOf(0L) }
     LaunchedEffect(controller) {
         val activeController = controller ?: return@LaunchedEffect
         while (isActive) {
             positionMs = activeController.currentPosition.coerceAtLeast(0)
+            durationMs = activeController.duration.coerceAtLeast(0)
             if (activeController.isPlaying) {
-                onProgress?.invoke(positionMs, activeController.duration.coerceAtLeast(0))
+                onProgress?.invoke(positionMs, durationMs)
             }
             delay(500)
         }
@@ -380,10 +397,30 @@ fun PlayerSurface(
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
     val mediaRouteButtonViewProvider = remember { ThemedMediaRouteButtonViewProvider() }
     var controllerVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(activeStream.url, playerView, device.isTv) {
-        if (device.isTv && playerView != null) {
+    var tvControlsVisible by remember { mutableStateOf(false) }
+    var tvControlsInteraction by remember { mutableIntStateOf(0) }
+    var lastAudibleVolume by remember { mutableStateOf(1f) }
+    val tvPlayPauseFocus = remember { FocusRequester() }
+    val tvPlayerFocus = remember { FocusRequester() }
+    LaunchedEffect(tvControlsVisible, focusPlayerOnStart) {
+        if (!tvControlsVisible || !focusPlayerOnStart) return@LaunchedEffect
+        delay(32)
+        runCatching { tvPlayPauseFocus.requestFocus() }
+    }
+    LaunchedEffect(tvControlsVisible, tvControlsInteraction, focusPlayerOnStart) {
+        if (!focusPlayerOnStart) {
+            tvControlsVisible = false
+            return@LaunchedEffect
+        }
+        if (!tvControlsVisible) return@LaunchedEffect
+        delay(8_000)
+        tvControlsVisible = false
+        runCatching { tvPlayerFocus.requestFocus() }
+    }
+    LaunchedEffect(activeStream.url, playerView, device.isTv, focusPlayerOnStart) {
+        if (device.isTv && focusPlayerOnStart && playerView != null) {
             delay(32)
-            playerView?.requestFocus()
+            runCatching { tvPlayerFocus.requestFocus() }
         }
     }
     val currentOnNextEpisode by rememberUpdatedState(onNextEpisode)
@@ -470,17 +507,36 @@ fun PlayerSurface(
         }
     }
 
-    Box(modifier) {
+    val remoteModifier = if (device.isTv && focusPlayerOnStart) {
+        Modifier
+            .focusRequester(tvPlayerFocus)
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                if (!opensTvPlayerControls(event.key)) return@onPreviewKeyEvent false
+                tvControlsInteraction++
+                if (!tvControlsVisible) {
+                    DiagnosticsLog.event("PlayerSurface TV controls opened key=${event.key}")
+                    tvControlsVisible = true
+                    true
+                } else {
+                    false
+                }
+            }
+            .focusable()
+    } else {
+        Modifier
+    }
+    Box(modifier.then(remoteModifier)) {
         AndroidView(
             factory = { ctx ->
                 DiagnosticsLog.event("PlayerSurface AndroidView factory create PlayerView")
                 PlayerView(ctx).apply {
                     player = playerControls
                     setMediaRouteButtonViewProvider(mediaRouteButtonViewProvider)
-                    useController = true
+                    useController = !device.isTv
                     keepScreenOn = true
-                    isFocusable = true
-                    isFocusableInTouchMode = true
+                    isFocusable = !device.isTv
+                    isFocusableInTouchMode = !device.isTv
                     setShowSubtitleButton(true)
                     // EpisodeControlPlayer maps these to app navigation; the playlist stays
                     // single-item because each episode resolves against multiple providers.
@@ -508,33 +564,18 @@ fun PlayerSurface(
                             }
                         },
                     )
-                    if (device.isTv) {
-                        setOnKeyListener { _, keyCode, event ->
-                            val isConfirm = keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                keyCode == KeyEvent.KEYCODE_ENTER ||
-                                keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
-                            if (isConfirm && event.action == KeyEvent.ACTION_DOWN && !isControllerFullyVisible) {
-                                showController()
-                                post {
-                                    findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)
-                                        ?.requestFocus()
-                                }
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                    }
                     if (onToggleFullscreen != null) {
                         setFullscreenButtonClickListener { onToggleFullscreen() }
                     }
                     bindUnifiedSettingsButton { settingsExpanded = true }
-                    if (device.isTv) post { requestFocus() }
                     playerView = this
                 }
             },
             update = {
                 it.player = playerControls
+                it.isFocusable = !device.isTv
+                it.isFocusableInTouchMode = !device.isTv
+                if (device.isTv) it.clearFocus()
                 // Deliberately NOT re-setting the media route button provider here: every
                 // setMediaRouteButtonViewProvider call inflates a fresh button, so repeated
                 // update passes stack duplicate cast icons. The factory sets it once.
@@ -642,6 +683,63 @@ fun PlayerSurface(
             CircularProgressIndicator(Modifier.align(Alignment.Center))
         }
 
+        if (device.isTv && focusPlayerOnStart && tvControlsVisible && controller != null) {
+            TvPlayerControls(
+                positionMs = positionMs,
+                durationMs = durationMs,
+                isPlaying = playbackIsPlaying,
+                isMuted = controller?.volume?.let { it <= 0.001f } == true,
+                hasPrevious = canGoPrevious,
+                hasNext = hasNextEpisode,
+                playPauseFocusRequester = tvPlayPauseFocus,
+                onPrevious = { currentOnPreviousEpisode?.invoke() },
+                onRewind = {
+                    DiagnosticsLog.event("PlayerSurface TV control rewind")
+                    controller?.seekBack()
+                },
+                onPlayPause = {
+                    DiagnosticsLog.event("PlayerSurface TV control playPause")
+                    controller?.let { active -> if (active.isPlaying) active.pause() else active.play() }
+                },
+                onForward = {
+                    DiagnosticsLog.event("PlayerSurface TV control forward")
+                    controller?.seekForward()
+                },
+                onNext = currentOnNextEpisode,
+                onVolumeDown = {
+                    DiagnosticsLog.event("PlayerSurface TV control volumeDown")
+                    controller?.let { active ->
+                        active.volume = (active.volume - 0.1f).coerceAtLeast(0f)
+                        if (active.volume > 0f) lastAudibleVolume = active.volume
+                    }
+                },
+                onToggleMute = {
+                    DiagnosticsLog.event("PlayerSurface TV control toggleMute")
+                    controller?.let { active ->
+                        if (active.volume > 0.001f) {
+                            lastAudibleVolume = active.volume
+                            active.volume = 0f
+                        } else {
+                            active.volume = lastAudibleVolume.coerceAtLeast(0.1f)
+                        }
+                    }
+                },
+                onVolumeUp = {
+                    DiagnosticsLog.event("PlayerSurface TV control volumeUp")
+                    controller?.let { active ->
+                        active.volume = (active.volume + 0.1f).coerceAtMost(1f)
+                        lastAudibleVolume = active.volume
+                    }
+                },
+                onSettings = {
+                    DiagnosticsLog.event("PlayerSurface TV control settings")
+                    settingsExpanded = true
+                },
+                onFullscreen = onToggleFullscreen,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+
         val action: Pair<String, () -> Unit>? = when {
             introEndMs != null && positionMs in introStartMs..introEndMs ->
                 "Skip Intro" to { controller?.seekTo(introEndMs); Unit }
@@ -649,16 +747,17 @@ fun PlayerSurface(
                 "Next Episode" to onNextEpisode
             else -> null
         }
-        LaunchedEffect(action?.first, playerView, device.isTv) {
-            if (device.isTv) {
+        LaunchedEffect(action?.first, playerView, device.isTv, focusPlayerOnStart) {
+            if (device.isTv && focusPlayerOnStart) {
                 // Compose may focus a newly inserted skip/next action before PlayerView can
                 // reclaim focus. Return remote input to the player once this frame settles.
                 delay(32)
-                playerView?.requestFocus()
+                runCatching { tvPlayerFocus.requestFocus() }
             }
         }
         action?.let { (label, onClick) ->
-            val actionModifier = if (controllerVisible) {
+            val controlsVisible = if (device.isTv) tvControlsVisible else controllerVisible
+            val actionModifier = if (controlsVisible) {
                 Modifier.align(Alignment.TopCenter).padding(top = 16.dp)
             } else {
                 Modifier.align(Alignment.BottomStart).padding(start = 24.dp, bottom = 24.dp)

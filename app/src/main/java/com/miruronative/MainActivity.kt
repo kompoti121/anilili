@@ -510,9 +510,9 @@ private fun AppNavHost(
                     onSeasonWatch = { seasonId ->
                         val saved = com.miruronative.data.library.LibraryStore.historyFor(seasonId)
                         if (saved != null) {
-                            nav.navigate(Routes.watch(seasonId, saved.provider, saved.category, saved.episodeLabel))
+                            nav.navigate(Routes.episodes(seasonId, saved.provider, saved.category, saved.episodeLabel))
                         } else {
-                            nav.navigate(Routes.watch(seasonId, "auto", if (com.miruronative.data.settings.SettingsStore.preferDub.value) "dub" else "sub", "1"))
+                            nav.navigate(Routes.episodes(seasonId, "auto", if (com.miruronative.data.settings.SettingsStore.preferDub.value) "dub" else "sub", "1"))
                         }
                     },
                 )
@@ -525,6 +525,10 @@ private fun AppNavHost(
                     navArgument(Routes.Arg.PROVIDER) { type = NavType.StringType },
                     navArgument(Routes.Arg.CATEGORY) { type = NavType.StringType },
                     navArgument(Routes.Arg.EPISODE) { type = NavType.StringType },
+                    navArgument(Routes.Arg.SHOW_EPISODES) {
+                        type = NavType.BoolType
+                        defaultValue = false
+                    },
                 ),
             ) { entry ->
                 val args = entry.arguments ?: return@composable
@@ -532,6 +536,7 @@ private fun AppNavHost(
                 val watchProvider = args.getString(Routes.Arg.PROVIDER).orEmpty()
                 val watchCategory = args.getString(Routes.Arg.CATEGORY).orEmpty()
                 val watchEpisode = args.getString(Routes.Arg.EPISODE).orEmpty()
+                val showEpisodes = args.getBoolean(Routes.Arg.SHOW_EPISODES)
                 LaunchedEffect(watchId, watchProvider, watchCategory, watchEpisode) {
                     DiagnosticsLog.event(
                         "Route WATCH content entered id=$watchId provider=$watchProvider " +
@@ -543,6 +548,7 @@ private fun AppNavHost(
                     provider = watchProvider,
                     category = watchCategory,
                     episode = watchEpisode,
+                    showEpisodeListInitially = showEpisodes,
                     inPictureInPicture = inPictureInPicture,
                     onBack = { nav.popBackStack() },
                 )
