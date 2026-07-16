@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
@@ -59,6 +60,7 @@ import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.ui.UiState
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
+import com.miruronative.ui.components.CaptionAppearanceDialog
 import com.miruronative.ui.profile.AniListProfile
 import com.miruronative.ui.profile.ProfileViewModel
 import kotlinx.coroutines.launch
@@ -91,8 +93,17 @@ fun SettingsScreen(
     var malExportBusy by remember { mutableStateOf(false) }
     var malExportMessage by remember { mutableStateOf<String?>(null) }
     var diagnosticsMessage by remember { mutableStateOf<String?>(null) }
+    var captionAppearanceVisible by remember { mutableStateOf(false) }
 
     LaunchedEffect(token) { vm.loadIfLoggedIn() }
+
+    if (captionAppearanceVisible) {
+        CaptionAppearanceDialog(
+            onDismiss = { captionAppearanceVisible = false },
+            footnote = "Applies to the built-in player. Servers that play in a web view render " +
+                "their own subtitles and may ignore some of these.",
+        )
+    }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -192,6 +203,14 @@ fun SettingsScreen(
                     "Show subtitles on dubbed episodes too (applies from the next episode)",
                     subtitlesWithDub,
                     SettingsStore::setSubtitlesWithDub,
+                )
+            }
+            item {
+                SettingsAction(
+                    title = "Caption appearance",
+                    icon = { Icon(Icons.Default.ClosedCaption, contentDescription = null) },
+                    enabled = true,
+                    onClick = { captionAppearanceVisible = true },
                 )
             }
             item { SectionDivider() }

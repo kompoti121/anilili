@@ -82,15 +82,20 @@ import com.miruronative.R
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.DefaultTrackNameProvider
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import com.miruronative.data.model.SkipTimes
 import com.miruronative.data.model.StreamItem
 import com.miruronative.data.model.SubtitleItem
+import com.miruronative.data.settings.CaptionEdgeStyle
+import com.miruronative.data.settings.CaptionStyle
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.playback.PlaybackService
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
+import com.miruronative.ui.components.CaptionAppearanceDialog
 import com.miruronative.ui.nav.Routes
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -459,6 +464,8 @@ fun PlayerSurface(
         }
     }
     var settingsExpanded by remember { mutableStateOf(false) }
+    var captionAppearanceVisible by remember { mutableStateOf(false) }
+    val captionStyle by SettingsStore.captionStyle.collectAsState()
     var pinnedVideoHeight by remember(controller, stream.url) { mutableStateOf<Int?>(null) }
     var seekFlash by remember { mutableIntStateOf(0) } // -10 / +10, 0 = hidden
     var seekFlashTick by remember { mutableIntStateOf(0) }
@@ -576,6 +583,7 @@ fun PlayerSurface(
                 it.isFocusable = !device.isTv
                 it.isFocusableInTouchMode = !device.isTv
                 if (device.isTv) it.clearFocus()
+                it.applyCaptionStyle(captionStyle)
                 // Deliberately NOT re-setting the media route button provider here: every
                 // setMediaRouteButtonViewProvider call inflates a fresh button, so repeated
                 // update passes stack duplicate cast icons. The factory sets it once.
@@ -677,7 +685,15 @@ fun PlayerSurface(
             },
             autoSkipIntroOutro = autoSkipIntroOutro,
             onAutoSkipIntroOutroChange = SettingsStore::setAutoSkipIntroOutro,
+            onOpenCaptionAppearance = {
+                settingsExpanded = false
+                captionAppearanceVisible = true
+            },
         )
+
+        if (captionAppearanceVisible) {
+            CaptionAppearanceDialog(onDismiss = { captionAppearanceVisible = false })
+        }
 
         if (controller == null) {
             CircularProgressIndicator(Modifier.align(Alignment.Center))
@@ -795,6 +811,7 @@ private fun PlaybackSettingsMenu(
     onVideoHeightChange: (Int?) -> Boolean,
     autoSkipIntroOutro: Boolean,
     onAutoSkipIntroOutroChange: (Boolean) -> Unit,
+    onOpenCaptionAppearance: () -> Unit,
 ) {
     if (controller == null || !expanded) return
     val context = LocalContext.current
@@ -900,6 +917,13 @@ private fun PlaybackSettingsMenu(
                     )
                 }
             }
+
+            HorizontalDivider()
+            SectionLabel("Captions")
+            DropdownMenuItem(
+                text = { Text("Caption appearance…") },
+                onClick = onOpenCaptionAppearance,
+            )
 
             HorizontalDivider()
             SectionLabel("Skipping")
@@ -1085,6 +1109,37 @@ private fun applyTextTrack(controller: MediaController, option: TrackOption?) {
             "PlayerSurface subtitle selection mode=manual name=${option.name.take(80)}"
         },
     )
+}
+
+/**
+ * Overrides the style PlayerView installs in its constructor. Without this, [SubtitleView] falls
+ * back to [CaptionStyleCompat.DEFAULT] — white on *fully opaque* black — for everyone who hasn't
+ * turned on captions in the system's Accessibility settings, which paints a solid box over the
+ * picture.
+ */
+@OptIn(UnstableApi::class)
+private fun PlayerView.applyCaptionStyle(style: CaptionStyle) {
+    val view = subtitleView ?: return
+    view.setStyle(
+        CaptionStyleCompat(
+            style.textArgb,
+            style.backgroundArgb,
+            android.graphics.Color.TRANSPARENT, // window: the box behind the whole line
+            style.edgeStyle.toMedia3EdgeType(),
+            android.graphics.Color.BLACK,
+            null,
+        ),
+    )
+    view.setFractionalTextSize(
+        SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * style.textScalePercent / 100f,
+    )
+}
+
+@OptIn(UnstableApi::class)
+private fun CaptionEdgeStyle.toMedia3EdgeType(): Int = when (this) {
+    CaptionEdgeStyle.NONE -> CaptionStyleCompat.EDGE_TYPE_NONE
+    CaptionEdgeStyle.OUTLINE -> CaptionStyleCompat.EDGE_TYPE_OUTLINE
+    CaptionEdgeStyle.DROP_SHADOW -> CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
 }
 
 @OptIn(UnstableApi::class)

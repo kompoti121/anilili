@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -77,11 +78,14 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.miruronative.data.model.SkipTimes
 import com.miruronative.data.model.StreamItem
+import com.miruronative.data.settings.CaptionEdgeStyle
+import com.miruronative.data.settings.CaptionStyle
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.diagnostics.CrashReporter
 import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
+import com.miruronative.ui.components.CaptionAppearanceDialog
 import kotlinx.coroutines.delay
 
 /**
@@ -124,6 +128,7 @@ fun EmbedWebView(
     val activeReferer = activeQualityStream?.referer ?: referer
     var qualityDialogVisible by remember(url) { mutableStateOf(false) }
     var speedDialogVisible by remember(url) { mutableStateOf(false) }
+    var captionAppearanceVisible by remember(url) { mutableStateOf(false) }
     var playbackSpeed by remember(url) { mutableStateOf(1f) }
     var webPlaybackAvailable by remember(activeUrl) { mutableStateOf(false) }
     var pendingSeekMs by remember(url, startPositionMs) { mutableLongStateOf(startPositionMs) }
@@ -156,6 +161,7 @@ fun EmbedWebView(
     val currentOnPlaybackError by rememberUpdatedState(onPlaybackError)
     val autoSkipIntroOutro by SettingsStore.autoSkipIntroOutro.collectAsState()
     val autoplay by SettingsStore.autoplay.collectAsState()
+    val captionStyle by SettingsStore.captionStyle.collectAsState()
     val introStartMs = skip?.introStart?.times(1000)?.toLong() ?: 0L
     val introEndMs = skip?.introEnd?.times(1000)?.toLong()
     val outroStartMs = skip?.outroStart?.times(1000)?.toLong()
@@ -208,6 +214,15 @@ fun EmbedWebView(
         val web = webView ?: return@LaunchedEffect
         if (!webPlaybackAvailable) return@LaunchedEffect
         web.evaluateJavascript(SET_PLAYBACK_SPEED_JS(playbackSpeed), null)
+    }
+
+    // Best-effort: reaches the main document and same-origin iframes only, exactly like the
+    // progress poll. A cross-origin embed renders its own captions out of our reach, and some
+    // providers burn subtitles into the video, where there is nothing to style at all.
+    LaunchedEffect(webPlaybackAvailable, captionStyle, webView) {
+        val web = webView ?: return@LaunchedEffect
+        if (!webPlaybackAvailable) return@LaunchedEffect
+        web.evaluateJavascript(CAPTION_STYLE_JS(captionStyle), null)
     }
 
     val chromeClient = remember {
@@ -436,6 +451,12 @@ fun EmbedWebView(
                 confirmButton = {
                     TextButton(onClick = { speedDialogVisible = false }) { Text("Close") }
                 },
+            )
+        }
+        if (captionAppearanceVisible) {
+            CaptionAppearanceDialog(
+                onDismiss = { captionAppearanceVisible = false },
+                footnote = "This server renders its own subtitles, so it may ignore some of these.",
             )
         }
         AndroidView(
@@ -672,6 +693,18 @@ fun EmbedWebView(
                         tint = Color.White,
                     )
                 }
+                // Gated on a reachable <video>: with none found, the page is cross-origin and the
+                // injected stylesheet cannot land, so offering the control would be a lie.
+                IconButton(
+                    onClick = { captionAppearanceVisible = true },
+                    modifier = Modifier.focusHighlight(RoundedCornerShape(4.dp)),
+                ) {
+                    Icon(
+                        Icons.Default.ClosedCaption,
+                        contentDescription = "Caption appearance",
+                        tint = Color.White,
+                    )
+                }
             }
         }
 
@@ -831,6 +864,63 @@ private fun SET_PLAYBACK_SPEED_JS(speed: Float): String = """
       }
     })();
 """.trimIndent()
+
+private const val CAPTION_STYLE_ELEMENT_ID = "anili-caption-style"
+
+/**
+ * Restyles captions in the main document and any same-origin iframe. Idempotent: re-running with a
+ * new style rewrites the same `<style>` element instead of stacking duplicates.
+ */
+private fun CAPTION_STYLE_JS(style: CaptionStyle): String = """
+    (function() {
+      var css = ${captionCss(style).toJsStringLiteral()};
+      function apply(doc) {
+        if (!doc) return;
+        var el = doc.getElementById('$CAPTION_STYLE_ELEMENT_ID');
+        if (!el) {
+          el = doc.createElement('style');
+          el.id = '$CAPTION_STYLE_ELEMENT_ID';
+          (doc.head || doc.documentElement).appendChild(el);
+        }
+        el.textContent = css;
+      }
+      try {
+        apply(document);
+        var frames = document.querySelectorAll('iframe');
+        for (var i = 0; i < frames.length; i++) {
+          try { apply(frames[i].contentDocument); } catch (e) { /* cross-origin */ }
+        }
+      } catch (e) { /* ignored */ }
+    })();
+""".trimIndent()
+
+/**
+ * `::cue` covers Chromium's own WebVTT rendering; the class selectors cover the embed players that
+ * draw captions as ordinary DOM instead. Ours is appended last, so at equal specificity it wins.
+ */
+internal fun captionCss(style: CaptionStyle): String {
+    val background = style.backgroundCssRgba()
+    // `background` first so the shorthand can't reset the colour we set right after it.
+    val declarations = "background: $background !important; " +
+        "background-color: $background !important; " +
+        "color: ${style.textCssHex()} !important; " +
+        "text-shadow: ${style.edgeStyle.toCssTextShadow()} !important; " +
+        "font-size: ${style.textScalePercent}% !important;"
+    return "::cue { $declarations }\n$DOM_CAPTION_SELECTORS { $declarations }"
+}
+
+private const val DOM_CAPTION_SELECTORS =
+    ".plyr__caption, .vjs-text-track-cue > div, .jw-text-track-cue, .art-subtitle"
+
+private fun CaptionEdgeStyle.toCssTextShadow(): String = when (this) {
+    CaptionEdgeStyle.NONE -> "none"
+    CaptionEdgeStyle.OUTLINE ->
+        "-1px -1px 1px #000, 1px -1px 1px #000, -1px 1px 1px #000, 1px 1px 1px #000"
+    CaptionEdgeStyle.DROP_SHADOW -> "2px 2px 3px rgba(0, 0, 0, 0.9)"
+}
+
+private fun String.toJsStringLiteral(): String =
+    "'" + replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n") + "'"
 
 private val REMOTE_TOGGLE_PLAYBACK_JS = """
     (function() {
