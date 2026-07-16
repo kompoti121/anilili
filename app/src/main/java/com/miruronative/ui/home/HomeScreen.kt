@@ -53,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -64,6 +65,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -245,15 +247,25 @@ private fun HomeContent(
     val catalog = data.tab(selectedTab).take(if (device.isTv) 28 else 18)
     val gridSpacing = if (device.isTv) 16.dp else 9.dp
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        // Size every home poster card to a single width, derived from posterWidth, so the
-        // catalog grid and the "Trending" rail share one universal card size. Columns are
+        // Handheld sizes every home poster card to a single width, derived from posterWidth, so
+        // the catalog grid and the "Trending" rail share one universal card size. Columns are
         // fitted to the real content width (maxWidth already excludes any navigation rail).
+        // TV keeps its fixed 7-column grid and posterWidth rail: fitting a 10-foot width to
+        // posterWidth leaves only four columns and blows the cards up.
         val available = maxWidth - device.pagePadding * 2f
-        val columns = maxOf(
-            1,
-            ((available.value + gridSpacing.value) / (device.posterWidth.value + gridSpacing.value)).toInt(),
-        )
-        val cardWidth = (available - gridSpacing * (columns - 1).toFloat()) / columns.toFloat()
+        val columns = if (device.isTv) {
+            7
+        } else {
+            maxOf(
+                1,
+                ((available.value + gridSpacing.value) / (device.posterWidth.value + gridSpacing.value)).toInt(),
+            )
+        }
+        val cardWidth = if (device.isTv) {
+            device.posterWidth
+        } else {
+            (available - gridSpacing * (columns - 1).toFloat()) / columns.toFloat()
+        }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 28.dp),
@@ -264,8 +276,10 @@ private fun HomeContent(
                     items = data.spotlight.take(6),
                     onAnimeClick = onAnimeClick,
                     onWatchNow = onWatchNow,
+                    // Reports whether focus actually landed on the rail. A miss (rail not
+                    // composed yet) must not swallow the key, or Down dies inside the hero.
                     onMoveDown = if (history.isNotEmpty()) {
-                        { runCatching { continueFocusRequester.requestFocus() } }
+                        { runCatching { continueFocusRequester.requestFocus() }.isSuccess }
                     } else {
                         null
                     },
@@ -331,7 +345,7 @@ private fun HeroPager(
     items: List<Media>,
     onAnimeClick: (Int) -> Unit,
     onWatchNow: (Int) -> Unit,
-    onMoveDown: (() -> Unit)?,
+    onMoveDown: (() -> Boolean)?,
 ) {
     if (items.isEmpty()) return
     val device = LocalAppDeviceProfile.current
@@ -428,10 +442,11 @@ private fun HeroCard(
     detailsFocusRequester: FocusRequester,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onMoveDown: (() -> Unit)?,
+    onMoveDown: (() -> Boolean)?,
 ) {
     val device = LocalAppDeviceProfile.current
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     val heroImage = media.bannerImage ?: media.coverImage.best
     val heroImageRequest = remember(heroImage) {
         ImageRequest.Builder(context)
@@ -492,8 +507,8 @@ private fun HeroCard(
                                         }
                                     }
                                     Key.DirectionDown -> {
-                                        onMoveDown?.invoke()
-                                        onMoveDown != null
+                                        onMoveDown?.invoke() == true ||
+                                            focusManager.moveFocus(FocusDirection.Down)
                                     }
                                     else -> false
                                 }
@@ -524,8 +539,8 @@ private fun HeroCard(
                                         }
                                     }
                                     Key.DirectionDown -> {
-                                        onMoveDown?.invoke()
-                                        onMoveDown != null
+                                        onMoveDown?.invoke() == true ||
+                                            focusManager.moveFocus(FocusDirection.Down)
                                     }
                                     else -> false
                                 }
