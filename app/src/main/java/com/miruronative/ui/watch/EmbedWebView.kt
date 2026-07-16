@@ -136,6 +136,9 @@ fun EmbedWebView(
     val currentOnNextEpisode by rememberUpdatedState(onNextEpisode)
     val currentHasPreviousEpisode by rememberUpdatedState(hasPreviousEpisode)
     val currentHasNextEpisode by rememberUpdatedState(hasNextEpisode)
+    // The WebView is built once, so the remote handler below has to read this live rather than
+    // capture the value it was created with.
+    val currentPlayerOwnsRemote by rememberUpdatedState(focusPlayerOnStart)
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val previousFocus = remember { FocusRequester() }
     val nextFocus = remember { FocusRequester() }
@@ -443,6 +446,14 @@ fun EmbedWebView(
                     DiagnosticsLog.webViewPackage("EmbedWebView factory")
                     object : WebView(ctx) {
                         override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                            // Only claim the remote while the player is the active surface. In the
+                            // TV episode grid the list owns the D-pad: handling keys here ate them
+                            // silently (the controls this opens are hidden in that state) and stole
+                            // Center from the box that opens the player fullscreen. Report them
+                            // unhandled rather than deferring to super, which would let the embed's
+                            // own page act on the remote; unhandled keys let the framework move
+                            // focus out of the player and back to the list.
+                            if (device.isTv && !currentPlayerOwnsRemote) return false
                             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                                 when {
                                     device.isTv && (

@@ -54,8 +54,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -289,7 +295,27 @@ private fun WatchContent(
             )
             Modifier.fillMaxWidth().height(playerHeightDp.dp)
         }
-        Box(playerModifier.background(Color.Black)) {
+        // TV, grid view: the player itself is the D-pad target, so Up from the selectors reaches
+        // it and Center opens it fullscreen (where the remote controls already live). The focus
+        // holder is this Compose box, never the player surface: an embed WebView that can take
+        // focus autofocuses on page load and traps the D-pad inside the embed's own HTML.
+        val playerFocusModifier = if (device.isTv && !fullscreen) {
+            Modifier
+                .focusHighlight(RoundedCornerShape(6.dp))
+                .onPreviewKeyEvent { event ->
+                    val enters = event.key == Key.DirectionCenter || event.key == Key.Enter
+                    if (event.type == KeyEventType.KeyDown && enters) {
+                        onToggleFullscreen()
+                        true
+                    } else {
+                        false
+                    }
+                }
+                .focusable()
+        } else {
+            Modifier
+        }
+        Box(playerModifier.then(playerFocusModifier).background(Color.Black)) {
             val stream = data.chosenStream
             key(data.provider, data.category, data.current.number, stream?.url, data.playbackGeneration) {
                 when {
