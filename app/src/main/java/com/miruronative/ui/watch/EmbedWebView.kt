@@ -619,10 +619,14 @@ fun EmbedWebView(
             }
         }
 
+        // Sits above the embed's own control bar rather than over the picture. The inset clears a
+        // typical bar: these are the provider's controls inside the WebView, so there is no real
+        // height to measure, and landing on their scrubber would be worse than floating a little
+        // high when they hide.
         if (!device.isTv) Row(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 12.dp)
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 72.dp)
                 .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(4.dp))
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
