@@ -33,6 +33,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -59,7 +60,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.miruronative.data.auth.AccountService
 import com.miruronative.data.auth.AuthManager
+import com.miruronative.data.auth.MalAuthManager
 import com.miruronative.data.library.HistoryEntry
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.library.WatchlistEntry
@@ -127,27 +130,45 @@ fun ProfileScreen(
 ) {
     val device = LocalAppDeviceProfile.current
     val token by AuthManager.token.collectAsState()
+    val malLoggedIn by MalAuthManager.loggedIn.collectAsState()
     val profileState by vm.profile.collectAsState()
     val history by LibraryStore.history.collectAsState()
     val watchlist by LibraryStore.watchlist.collectAsState()
     val isRefreshing by vm.isRefreshing.collectAsState()
-    var showLogin by remember { mutableStateOf(false) }
+    var loginService by remember { mutableStateOf<AccountService?>(null) }
     var selectedViewName by rememberSaveable { mutableStateOf(LibraryView.WATCHLIST.name) }
     var selectedFormat by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedAiring by rememberSaveable { mutableStateOf<String?>(null) }
     var titleFilter by rememberSaveable { mutableStateOf("") }
+    val loggedIn = token != null || malLoggedIn
 
-    LaunchedEffect(token) {
-        if (token == null) selectedViewName = LibraryView.WATCHLIST.name
+    LaunchedEffect(loggedIn) {
+        if (!loggedIn) selectedViewName = LibraryView.WATCHLIST.name
         vm.loadIfLoggedIn()
     }
 
-    if (showLogin) {
-        LoginWebView(
-            onToken = { showLogin = false; vm.onLoggedIn(it) },
-            onCancel = { showLogin = false },
-        )
-        return
+    when (loginService) {
+        AccountService.ANILIST -> {
+            LoginWebView(
+                authorizeUrl = remember { AuthManager.authorizeUrl() },
+                isRedirect = AuthManager::isRedirect,
+                extractResult = AuthManager::extractToken,
+                onResult = { loginService = null; vm.onLoggedIn(it) },
+                onCancel = { loginService = null },
+            )
+            return
+        }
+        AccountService.MAL -> {
+            LoginWebView(
+                authorizeUrl = remember { MalAuthManager.authorizeUrl() },
+                isRedirect = MalAuthManager::isRedirect,
+                extractResult = MalAuthManager::extractCode,
+                onResult = { loginService = null; vm.onMalCode(it) },
+                onCancel = { loginService = null },
+            )
+            return
+        }
+        null -> Unit
     }
 
     val profile = (profileState as? UiState.Success)?.data
@@ -191,9 +212,9 @@ fun ProfileScreen(
             ) {
             item {
                 ProfileHero(
-                    loggedIn = token != null,
+                    loggedIn = loggedIn,
                     state = profileState,
-                    onLogin = { showLogin = true },
+                    onLogin = { loginService = it },
                     onSync = { vm.loadIfLoggedIn() },
                     onLogout = vm::logout,
                 )
@@ -218,9 +239,10 @@ fun ProfileScreen(
                 )
             }
             item {
+                val serviceLabel = profile?.service?.label ?: "AniList"
                 ProfileSectionTitle(
                     selectedView.label,
-                    if (selectedView == LibraryView.WATCHLIST) "Saved here and in AniList Planning" else "Synced from AniList",
+                    if (selectedView == LibraryView.WATCHLIST) "Saved here and in $serviceLabel Planning" else "Synced from $serviceLabel",
                 )
             }
             if (selectedCards.isEmpty()) {
@@ -271,7 +293,7 @@ fun ProfileScreen(
 private fun ProfileHero(
     loggedIn: Boolean,
     state: UiState<AniListProfile>?,
-    onLogin: () -> Unit,
+    onLogin: (AccountService) -> Unit,
     onSync: () -> Unit,
     onLogout: () -> Unit,
 ) {
@@ -289,13 +311,24 @@ private fun ProfileHero(
             Column(Modifier.fillMaxWidth().padding(20.dp)) {
                 Text("Your anime, in one place", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                 Text(
-                    "Connect AniList to browse every list, score, and episode progress from Anilili.",
+                    "Connect AniList or MyAnimeList to browse every list, score, and episode progress from Anilili.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 5.dp),
                 )
-                Button(onClick = onLogin, modifier = Modifier.padding(top = 16.dp).focusHighlight(RoundedCornerShape(9.dp))) {
-                    Text("Login with AniList", fontWeight = FontWeight.Bold)
+                Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = { onLogin(AccountService.ANILIST) },
+                        modifier = Modifier.focusHighlight(RoundedCornerShape(9.dp)),
+                    ) {
+                        Text("Login with AniList", fontWeight = FontWeight.Bold)
+                    }
+                    OutlinedButton(
+                        onClick = { onLogin(AccountService.MAL) },
+                        modifier = Modifier.focusHighlight(RoundedCornerShape(9.dp)),
+                    ) {
+                        Text("Login with MAL", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
             return
@@ -339,7 +372,7 @@ private fun ProfileHero(
                     Column(Modifier.weight(1f)) {
                         Text(viewer.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                         Text(
-                            listOfNotNull("Signed in via AniList", joinedLabel(viewer.createdAt)).joinToString("  ·  "),
+                            listOfNotNull("Signed in via ${state.data.service.label}", joinedLabel(viewer.createdAt)).joinToString("  ·  "),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -353,14 +386,14 @@ private fun ProfileHero(
                 }
             }
             is UiState.Error -> Column(Modifier.padding(18.dp)) {
-                Text("AniList could not be loaded", fontWeight = FontWeight.Bold)
+                Text("Your lists could not be loaded", fontWeight = FontWeight.Bold)
                 Text(state.message, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
                 Row(Modifier.padding(top = 8.dp)) {
                     TextButton(onClick = onSync) { Text("Try again") }
                     TextButton(onClick = onLogout) { Text("Logout") }
                 }
             }
-            else -> Text("Syncing your AniList profile…", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
+            else -> Text("Syncing your profile…", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(20.dp))
         }
     }
 }

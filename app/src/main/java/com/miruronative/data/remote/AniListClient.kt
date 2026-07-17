@@ -161,12 +161,14 @@ class AniListClient(
     /** The five Home collections in one GraphQL operation, avoiding a burst on every cold start. */
     suspend fun homeCollections(hideAdult: Boolean = false): HomeCollections = withContext(Dispatchers.IO) {
         val gql = """
-            query (${'$'}isAdult: Boolean) {
+            query (${'$'}isAdult: Boolean, ${'$'}airedBefore: Int) {
               spotlight: Page(page: 1, perPage: 30) {
                 media(type: ANIME, sort: [TRENDING_DESC], isAdult: ${'$'}isAdult) { $mediaListFields }
               }
-              newest: Page(page: 1, perPage: 30) {
-                media(type: ANIME, status: RELEASING, sort: [START_DATE_DESC], isAdult: ${'$'}isAdult) { $mediaListFields }
+              newest: Page(page: 1, perPage: 50) {
+                airingSchedules(airingAt_lesser: ${'$'}airedBefore, sort: TIME_DESC) {
+                  media { $mediaListFields }
+                }
               }
               popular: Page(page: 1, perPage: 30) {
                 media(type: ANIME, sort: [POPULARITY_DESC], isAdult: ${'$'}isAdult) { $mediaListFields }
@@ -179,11 +181,21 @@ class AniListClient(
               }
             }
         """.trimIndent()
-        val variables = buildJsonObject { if (hideAdult) put("isAdult", false) }
+        val variables = buildJsonObject {
+            if (hideAdult) put("isAdult", false)
+            // airingAt is the broadcast start; allow ~25 min runtime plus an hour for
+            // streaming sites to pick the episode up, so every entry is actually watchable.
+            put("airedBefore", System.currentTimeMillis() / 1000 - NEWEST_AIRED_BUFFER_SEC)
+        }
         val data = json.decodeFromString(GqlHomeCollectionsResponse.serializer(), post(gql, variables)).data
         HomeCollections(
             spotlight = data?.spotlight?.media.orEmpty(),
-            newest = data?.newest?.media.orEmpty(),
+            // Recently aired episodes, newest first; a show airing several times in the
+            // window appears once. isAdult can't be filtered inside airingSchedules.
+            newest = data?.newest?.airingSchedules.orEmpty()
+                .mapNotNull { it.media }
+                .distinctBy { it.id }
+                .filterNot { hideAdult && it.isAdult },
             popular = data?.popular?.media.orEmpty(),
             movies = data?.movies?.media.orEmpty(),
             topRated = data?.topRated?.media.orEmpty(),
@@ -336,6 +348,23 @@ class AniListClient(
             }
             all.distinctBy { it.airingAt to it.media?.id }
         }
+
+    /** AniList media for the given MAL ids (one page per 50); unknown ids are simply absent. */
+    suspend fun mediaByMalIds(malIds: List<Int>): List<Media> = withContext(Dispatchers.IO) {
+        val gql = """
+            query (${'$'}ids: [Int]) {
+              Page(page: 1, perPage: 50) {
+                media(type: ANIME, idMal_in: ${'$'}ids) { $mediaListFields }
+              }
+            }
+        """.trimIndent()
+        malIds.distinct().chunked(50).flatMap { chunk ->
+            val vars = buildJsonObject {
+                put("ids", kotlinx.serialization.json.JsonArray(chunk.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            }
+            json.decodeFromString(GqlPageResponse.serializer(), post(gql, vars)).data?.page?.media.orEmpty()
+        }
+    }
 
     suspend fun animeInfo(id: Int): Media? = withContext(Dispatchers.IO) {
         val gql = """
@@ -679,6 +708,9 @@ class AniListClient(
         private const val DEFAULT_RETRY_AFTER_SECONDS = 10L
         private const val MAX_FAVOURITE_PAGES = 40
         private const val MAX_SCHEDULE_PAGES = 10
+
+        /** Episode start must be at least this old (~25 min runtime + 1 h for links to appear). */
+        private const val NEWEST_AIRED_BUFFER_SEC = 90L * 60
         private const val SAVED_SYNC_BATCH_SIZE = 10
         private const val USER_AGENT = "Anilili/0.1.14 Android (AniList client 45552)"
     }

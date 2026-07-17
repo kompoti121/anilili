@@ -22,15 +22,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
-import com.miruronative.data.auth.AuthManager
 import com.miruronative.diagnostics.CrashReporter
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
 import androidx.compose.foundation.shape.RoundedCornerShape
 
 /**
- * Fullscreen AniList login. Loads the implicit-grant authorize URL; when AniList redirects to
- * `http://localhost/#access_token=…`, we grab the token before loading that URL.
+ * Fullscreen OAuth login shared by AniList and MyAnimeList. Loads [authorizeUrl]; when the
+ * service redirects to its registered localhost URL, [extractResult] pulls the token (AniList
+ * implicit grant) or authorization code (MAL) out of it before Android networking tries to
+ * open localhost, and the result is handed to [onResult].
  */
 
 /**
@@ -80,7 +81,13 @@ private class TvImeBridge(private val webView: WebView) {
 }
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun LoginWebView(onToken: (String) -> Unit, onCancel: () -> Unit) {
+fun LoginWebView(
+    authorizeUrl: String,
+    isRedirect: (String) -> Boolean,
+    extractResult: (String) -> String?,
+    onResult: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
     val device = LocalAppDeviceProfile.current
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(Modifier.fillMaxSize()) {
@@ -98,11 +105,11 @@ fun LoginWebView(onToken: (String) -> Unit, onCancel: () -> Unit) {
                             settings.allowContentAccess = false
                             webViewClient = object : WebViewClient() {
                                 private fun handleRedirect(view: WebView?, url: String?): Boolean {
-                                    if (tokenHandled || url == null || !AuthManager.isRedirect(url)) return false
-                                    val token = AuthManager.extractToken(url) ?: return false
+                                    if (tokenHandled || url == null || !isRedirect(url)) return false
+                                    val result = extractResult(url) ?: return false
                                     tokenHandled = true
                                     view?.stopLoading()
-                                    onToken(token)
+                                    onResult(result)
                                     return true
                                 }
 
@@ -127,11 +134,11 @@ fun LoginWebView(onToken: (String) -> Unit, onCancel: () -> Unit) {
                                 }
                             }
                             if (device.isTv) addJavascriptInterface(TvImeBridge(this), "MiruroTvIme")
-                            loadUrl(AuthManager.authorizeUrl())
+                            loadUrl(authorizeUrl)
                             if (device.isTv) post { requestFocus() }
                         }
                     } catch (e: Throwable) {
-                        CrashReporter.logNonFatal("System WebView unavailable; AniList login disabled", e)
+                        CrashReporter.logNonFatal("System WebView unavailable; login disabled", e)
                         android.view.View(ctx)
                     }
                 },

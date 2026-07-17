@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.miruronative.data.reminder.ReleaseSyncScheduler
 import com.miruronative.data.AppGraph
-import com.miruronative.data.auth.AuthManager
+import com.miruronative.data.auth.AccountService
 import com.miruronative.data.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -82,22 +82,45 @@ object LibraryStore {
         _watchlist.value = updated
         persist(KEY_WATCHLIST, updated, WatchlistEntry.serializer())
         ReleaseSyncScheduler.runNow(appContext)
-        if (AuthManager.isLoggedIn && SettingsStore.syncSavedToAniList.value) {
+        val service = AccountService.active
+        if (service != null && SettingsStore.syncSavedToAniList.value) {
             val saved = updated.any { it.anilistId == entry.anilistId }
             scope.launch {
                 aniListSyncMutex.withLock {
-                    runCatching { AppGraph.repository.syncSavedAnime(entry.anilistId, saved) }
+                    runCatching {
+                        when (service) {
+                            AccountService.ANILIST -> AppGraph.repository.syncSavedAnime(entry.anilistId, saved)
+                            AccountService.MAL -> AppGraph.repository.malSyncSavedAnime(entry.anilistId, saved)
+                        }
+                    }.onFailure {
+                        com.miruronative.diagnostics.DiagnosticsLog.throwable(
+                            "${service.label} saved sync failed id=${entry.anilistId} saved=$saved",
+                            it,
+                        )
+                    }
                 }
             }
         }
     }
 
-    fun syncSavedToAniList() {
-        if (!AuthManager.isLoggedIn || !SettingsStore.syncSavedToAniList.value) return
+    /** Push the whole device watchlist to whichever list service is signed in. */
+    fun syncSavedToRemote() {
+        val service = AccountService.active ?: return
+        if (!SettingsStore.syncSavedToAniList.value) return
         val savedIds = _watchlist.value.map { it.anilistId }
         scope.launch {
             aniListSyncMutex.withLock {
-                runCatching { AppGraph.repository.syncSavedAnime(savedIds) }
+                runCatching {
+                    when (service) {
+                        AccountService.ANILIST -> AppGraph.repository.syncSavedAnime(savedIds)
+                        AccountService.MAL -> AppGraph.repository.malSyncSavedAnime(savedIds)
+                    }
+                }.onFailure {
+                    com.miruronative.diagnostics.DiagnosticsLog.throwable(
+                        "${service.label} watchlist sync failed (${savedIds.size} titles)",
+                        it,
+                    )
+                }
             }
         }
     }

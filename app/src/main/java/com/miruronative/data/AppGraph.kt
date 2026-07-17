@@ -6,6 +6,7 @@ import com.miruronative.data.remote.AniListClient
 import com.miruronative.data.remote.AniSkipClient
 import com.miruronative.data.remote.AnivexaClient
 import com.miruronative.data.remote.JikanClient
+import com.miruronative.data.remote.MalClient
 import com.miruronative.data.remote.PipeClient
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -48,6 +49,7 @@ object AppGraph {
             anivexa = AnivexaClient(httpClient, json, aniList),
             jikan = JikanClient(httpClient, json),
             aniSkip = AniSkipClient(httpClient, json),
+            mal = MalClient(httpClient, json),
             cache = AppCache(context, json),
         )
     }

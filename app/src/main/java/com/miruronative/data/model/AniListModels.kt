@@ -164,7 +164,7 @@ data class HomeCollections(
 @Serializable
 data class HomeCollectionsData(
     val spotlight: Page? = null,
-    val newest: Page? = null,
+    val newest: SchedulePage? = null,
     val popular: Page? = null,
     val movies: Page? = null,
     val topRated: Page? = null,

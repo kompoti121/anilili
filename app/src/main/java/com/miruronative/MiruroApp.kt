@@ -12,6 +12,7 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.miruronative.data.AppGraph
 import com.miruronative.data.auth.AuthManager
+import com.miruronative.data.auth.MalAuthManager
 import com.miruronative.diagnostics.CrashReporter
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.settings.SettingsStore
@@ -50,6 +51,7 @@ class MiruroApp : Application(), ImageLoaderFactory {
         diagnosticsStep("AppGraph.init") { AppGraph.init(this) }
         diagnosticsStep("LibraryStore.init") { LibraryStore.init(this) }
         diagnosticsStep("AuthManager.init") { AuthManager.init(this) }
+        diagnosticsStep("MalAuthManager.init") { MalAuthManager.init(this, AppGraph.httpClient) }
         diagnosticsStep("SettingsStore.init") { SettingsStore.init(this) }
         diagnosticsStep("ReminderManager.init") { ReminderManager.init(this) }
         diagnosticsStep("AutomaticReleaseManager.init") { AutomaticReleaseManager.init(this) }

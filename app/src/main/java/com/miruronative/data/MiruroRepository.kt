@@ -13,11 +13,19 @@ import com.miruronative.data.cache.AppCache
 import com.miruronative.data.auth.AuthManager
 import com.miruronative.data.model.DiscoverOptions
 import com.miruronative.data.model.SkipTimes
+import com.miruronative.data.model.AnimeStat
+import com.miruronative.data.model.MediaListEntry
+import com.miruronative.data.model.UserAvatar
+import com.miruronative.data.model.Viewer
+import com.miruronative.data.model.ViewerStatistics
 import com.miruronative.data.remote.AniListClient
 import com.miruronative.data.remote.AniSkipClient
 import com.miruronative.data.remote.AnivexaClient
 import com.miruronative.data.remote.JikanClient
+import com.miruronative.data.remote.MalClient
+import com.miruronative.data.remote.MediaListProgressSnapshot
 import com.miruronative.data.remote.PipeClient
+import com.miruronative.data.remote.planMediaListProgressUpdate
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.diagnostics.DiagnosticsLog
 import kotlinx.coroutines.async
@@ -61,6 +69,7 @@ class MiruroRepository(
     private val anivexa: AnivexaClient,
     private val jikan: JikanClient,
     private val aniSkip: AniSkipClient,
+    private val mal: MalClient,
     private val cache: AppCache,
 ) {
     /** User preference: keep hentai out of every browsing surface. */
@@ -74,7 +83,7 @@ class MiruroRepository(
     suspend fun homeCollections(force: Boolean = false): HomeCollections {
         val adultHidden = hideAdult
         val collections = cache.getOrFetch(
-            key = "home:v1:${if (adultHidden) "sfw" else "all"}",
+            key = "home:v2:${if (adultHidden) "sfw" else "all"}",
             serializer = HomeCollections.serializer(),
             ttlMs = HOME_TTL,
             forceRefresh = force,
@@ -149,6 +158,109 @@ class MiruroRepository(
     suspend fun syncSavedAnime(mediaIds: Collection<Int>) {
         val viewerId = AuthManager.viewerId() ?: aniList.viewer()?.id ?: return
         aniList.syncSavedAnime(mediaIds, viewerId)
+    }
+
+    // ---- authenticated (MyAnimeList login) ----
+
+    /** The MAL account shaped like an AniList [Viewer] so the profile UI stays shared. */
+    suspend fun malViewer(): Viewer {
+        val user = mal.viewer()
+        val stats = user.animeStatistics
+        return Viewer(
+            id = user.id,
+            name = user.name,
+            avatar = UserAvatar(large = user.picture),
+            bannerImage = null,
+            createdAt = user.joinedAt?.let { raw ->
+                runCatching { java.time.OffsetDateTime.parse(raw).toEpochSecond() }.getOrNull()
+            },
+            statistics = ViewerStatistics(
+                anime = AnimeStat(
+                    count = stats?.numItems ?: 0,
+                    minutesWatched = ((stats?.numDaysWatched ?: 0.0) * 1440).toLong(),
+                    meanScore = stats?.meanScore ?: 0.0,
+                ),
+            ),
+        )
+    }
+
+    /**
+     * The MAL anime list as AniList-shaped [MediaListEntry]s. MAL ids are joined back to
+     * AniList media in day-cached batches of 50; the odd title AniList doesn't know is dropped.
+     */
+    suspend fun malAnimeList(): List<MediaListEntry> {
+        val entries = mal.animeList()
+        val byMalId = mutableMapOf<Int, Media>()
+        entries.map { it.malId }.distinct().sorted().chunked(50).forEach { chunk ->
+            cache.getOrFetch(
+                key = "malmap:v1:${chunk.hashCode()}",
+                serializer = ListSerializer(Media.serializer()),
+                ttlMs = MAL_MAP_TTL,
+            ) { aniList.mediaByMalIds(chunk) }
+                .forEach { media -> media.idMal?.let { byMalId[it] = media } }
+        }
+        return entries.mapNotNull { entry ->
+            val media = byMalId[entry.malId] ?: return@mapNotNull null
+            MediaListEntry(
+                id = entry.malId,
+                progress = entry.progress,
+                score = entry.score,
+                status = entry.status,
+                media = media,
+            )
+        }
+    }
+
+    /** Mirrors the device Save button on MAL without damaging an existing list state. */
+    suspend fun malSyncSavedAnime(anilistId: Int, saved: Boolean) {
+        val malId = animeInfo(anilistId)?.idMal?.takeIf { it > 0 }
+        if (malId == null) {
+            DiagnosticsLog.event("MAL saved sync skipped id=$anilistId: no MAL id on AniList")
+            return
+        }
+        val current = mal.listStatus(malId)
+        when {
+            saved && current == null -> {
+                mal.updateListStatus(malId, status = "plan_to_watch")
+                DiagnosticsLog.event("MAL saved sync added malId=$malId (id=$anilistId)")
+            }
+            !saved && current?.status == "plan_to_watch" -> {
+                mal.deleteListEntry(malId)
+                DiagnosticsLog.event("MAL saved sync removed malId=$malId (id=$anilistId)")
+            }
+            else -> DiagnosticsLog.event(
+                "MAL saved sync no-op malId=$malId (id=$anilistId) saved=$saved currentStatus=${current?.status}",
+            )
+        }
+    }
+
+    /** Batch push: one list fetch, then add only the titles MAL doesn't have yet. */
+    suspend fun malSyncSavedAnime(anilistIds: Collection<Int>) {
+        if (anilistIds.isEmpty()) return
+        val onMal = mal.animeList().map { it.malId }.toSet()
+        anilistIds.forEach { id ->
+            runCatching {
+                val malId = animeInfo(id)?.idMal?.takeIf { it > 0 }
+                when {
+                    malId == null -> DiagnosticsLog.event("MAL saved sync skipped id=$id: no MAL id on AniList")
+                    malId !in onMal -> {
+                        mal.updateListStatus(malId, status = "plan_to_watch")
+                        DiagnosticsLog.event("MAL saved sync added malId=$malId (id=$id)")
+                    }
+                }
+            }.onFailure { DiagnosticsLog.throwable("MAL saved sync failed id=$id", it) }
+        }
+    }
+
+    /** Update MAL watched progress with the same non-regression policy as the AniList sync. */
+    suspend fun saveMalProgress(anilistId: Int, progress: Int, totalEpisodes: Int?) {
+        val media = animeInfo(anilistId)
+        val malId = media?.idMal?.takeIf { it > 0 } ?: return
+        val current = mal.listStatus(malId)?.let {
+            MediaListProgressSnapshot(id = malId, status = MalClient.anilistStatus(it), progress = it.numEpisodesWatched)
+        }
+        val update = planMediaListProgressUpdate(current, progress, totalEpisodes ?: media.episodes) ?: return
+        mal.updateListStatus(malId, progress = update.progress, status = update.status?.let(MalClient::malStatus))
     }
 
     /** MAL filler episode numbers via Jikan; cached a week, empty on failure or no MAL id. */
@@ -388,6 +500,8 @@ class MiruroRepository(
         const val SERIES_FETCH_CONCURRENCY = 2
         const val SCHEDULE_TTL = 15L * 60 * 1000
         const val HOME_TTL = 30L * 60 * 1000
+        /** MAL id → AniList media join; ids never remap, so a day is conservative. */
+        const val MAL_MAP_TTL = 24L * 60 * 60 * 1000
         const val SEARCH_TTL = 30L * 60 * 1000
         const val AIRING_TTL = 30L * 60 * 1000
         const val COLLECTION_TTL = 4L * 60 * 60 * 1000

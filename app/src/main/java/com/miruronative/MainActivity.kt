@@ -194,7 +194,7 @@ class MainActivity : FragmentActivity() {
         DiagnosticsLog.event("Auth redirect received")
         AuthManager.extractToken(url)?.let { token ->
             AuthManager.setToken(token)
-            LibraryStore.syncSavedToAniList()
+            LibraryStore.syncSavedToRemote()
             pendingRoute = Routes.MORE
             DiagnosticsLog.event("Auth redirect accepted")
         }

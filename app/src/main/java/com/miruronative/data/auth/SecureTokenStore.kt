@@ -11,31 +11,37 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Stores the AniList bearer token encrypted by a non-exportable Android Keystore key. */
-internal class SecureTokenStore(context: Context) {
+/**
+ * Stores a bearer token (or token bundle) encrypted by a non-exportable Android Keystore key.
+ * [slotKey] names the SharedPreferences entry; the default is the original AniList slot, whose
+ * key and AAD must never change or existing logins would be dropped on update.
+ */
+internal class SecureTokenStore(context: Context, private val slotKey: String = KEY_TOKEN_ENCRYPTED) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val aad = slotKey.toByteArray(StandardCharsets.UTF_8)
 
     fun load(): String? {
         migrateLegacyToken()
-        val encoded = prefs.getString(KEY_TOKEN_ENCRYPTED, null) ?: return null
+        val encoded = prefs.getString(slotKey, null) ?: return null
         return runCatching { decrypt(encoded) }
-            .onFailure { prefs.edit().remove(KEY_TOKEN_ENCRYPTED).apply() }
+            .onFailure { prefs.edit().remove(slotKey).apply() }
             .getOrNull()
     }
 
     fun save(token: String) {
         val encrypted = encrypt(token)
         prefs.edit()
-            .putString(KEY_TOKEN_ENCRYPTED, encrypted)
+            .putString(slotKey, encrypted)
             .remove(KEY_TOKEN_LEGACY)
             .apply()
     }
 
     fun clear() {
-        prefs.edit().remove(KEY_TOKEN_ENCRYPTED).remove(KEY_TOKEN_LEGACY).apply()
+        prefs.edit().remove(slotKey).remove(KEY_TOKEN_LEGACY).apply()
     }
 
     private fun migrateLegacyToken() {
+        if (slotKey != KEY_TOKEN_ENCRYPTED) return
         val legacy = prefs.getString(KEY_TOKEN_LEGACY, null) ?: return
         runCatching { save(legacy) }
             .onFailure { prefs.edit().remove(KEY_TOKEN_LEGACY).apply() }
@@ -44,7 +50,7 @@ internal class SecureTokenStore(context: Context) {
     private fun encrypt(value: String): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, secretKey())
-        cipher.updateAAD(AAD)
+        cipher.updateAAD(aad)
         val ciphertext = cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
         return Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" +
             Base64.encodeToString(ciphertext, Base64.NO_WRAP)
@@ -57,7 +63,7 @@ internal class SecureTokenStore(context: Context) {
         val ciphertext = Base64.decode(parts[1], Base64.NO_WRAP)
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
-        cipher.updateAAD(AAD)
+        cipher.updateAAD(aad)
         return String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8)
     }
 
@@ -79,14 +85,14 @@ internal class SecureTokenStore(context: Context) {
         }
     }
 
-    private companion object {
+    internal companion object {
         const val PREFS_NAME = "miruro_auth"
         const val KEY_TOKEN_LEGACY = "anilist_token"
         const val KEY_TOKEN_ENCRYPTED = "anilist_token_v2"
+        const val KEY_MAL_TOKENS = "mal_tokens_v1"
         const val KEY_ALIAS = "miruro_anilist_token_key_v1"
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val GCM_TAG_BITS = 128
-        val AAD: ByteArray = KEY_TOKEN_ENCRYPTED.toByteArray(StandardCharsets.UTF_8)
     }
 }

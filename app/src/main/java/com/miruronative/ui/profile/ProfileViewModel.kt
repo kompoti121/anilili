@@ -3,7 +3,9 @@ package com.miruronative.ui.profile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.miruronative.data.AppGraph
+import com.miruronative.data.auth.AccountService
 import com.miruronative.data.auth.AuthManager
+import com.miruronative.data.auth.MalAuthManager
 import com.miruronative.data.model.MediaListEntry
 import com.miruronative.data.model.MediaListCollection
 import com.miruronative.data.model.Viewer
@@ -30,6 +32,8 @@ data class AniListProfile(
     val paused: List<MediaListEntry>,
     val completed: List<MediaListEntry>,
     val dropped: List<MediaListEntry>,
+    /** Which service these lists came from; AniList and MAL entries share this shape. */
+    val service: AccountService = AccountService.ANILIST,
 )
 
 class ProfileViewModel : ViewModel() {
@@ -41,15 +45,21 @@ class ProfileViewModel : ViewModel() {
     val isRefreshing = _isRefreshing.asStateFlow()
 
     fun loadIfLoggedIn(refresh: Boolean = false) {
-        if (!AuthManager.isLoggedIn) {
+        val service = AccountService.active
+        if (service == null) {
             _profile.value = null
             return
         }
         viewModelScope.launch {
             if (refresh && _profile.value is UiState.Success) _isRefreshing.value = true else _profile.value = UiState.Loading
             try {
-                val viewer = repo.viewer() ?: error("Couldn't load your AniList profile")
-                val entries = repo.userAnimeList(viewer.id).allEntries()
+                val (viewer, entries) = when (service) {
+                    AccountService.ANILIST -> {
+                        val viewer = repo.viewer() ?: error("Couldn't load your AniList profile")
+                        viewer to repo.userAnimeList(viewer.id).allEntries()
+                    }
+                    AccountService.MAL -> repo.malViewer() to repo.malAnimeList()
+                }
                 val watching = entries.filter { it.status == "CURRENT" }
                 val rewatching = entries.filter { it.status == "REPEATING" }
                 val planning = entries.filter { it.status == "PLANNING" }
@@ -71,11 +81,11 @@ class ProfileViewModel : ViewModel() {
                     )
                 }
                 _profile.value = UiState.Success(
-                    AniListProfile(viewer, watching, rewatching, planning, paused, completed, dropped),
+                    AniListProfile(viewer, watching, rewatching, planning, paused, completed, dropped, service),
                 )
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
-                _profile.value = UiState.Error(e.message ?: "Failed to load AniList")
+                _profile.value = UiState.Error(e.message ?: "Failed to load ${service.label}")
             } finally {
                 _isRefreshing.value = false
             }
@@ -86,12 +96,29 @@ class ProfileViewModel : ViewModel() {
 
     fun onLoggedIn(token: String) {
         AuthManager.setToken(token)
-        LibraryStore.syncSavedToAniList()
+        LibraryStore.syncSavedToRemote()
         loadIfLoggedIn()
+    }
+
+    /** MAL redirect hands back a code; trade it for tokens before loading the profile. */
+    fun onMalCode(code: String) {
+        _profile.value = UiState.Loading
+        viewModelScope.launch {
+            try {
+                MalAuthManager.exchangeCode(code)
+                LibraryStore.syncSavedToRemote()
+                loadIfLoggedIn()
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                MalAuthManager.logout()
+                _profile.value = UiState.Error(e.message ?: "MyAnimeList login failed")
+            }
+        }
     }
 
     fun logout() {
         AuthManager.logout()
+        MalAuthManager.logout()
         _profile.value = null
     }
 

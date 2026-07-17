@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.miruronative.data.auth.AuthManager
+import com.miruronative.data.auth.MalAuthManager
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.library.MalExportFile
 import com.miruronative.data.reminder.AutomaticReleaseManager
@@ -74,6 +75,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val device = LocalAppDeviceProfile.current
     val token by AuthManager.token.collectAsState()
+    val malLoggedIn by MalAuthManager.loggedIn.collectAsState()
     val profileState by vm.profile.collectAsState()
     val history by LibraryStore.history.collectAsState()
     val watchlist by LibraryStore.watchlist.collectAsState()
@@ -95,7 +97,7 @@ fun SettingsScreen(
     var diagnosticsMessage by remember { mutableStateOf<String?>(null) }
     var captionAppearanceVisible by remember { mutableStateOf(false) }
 
-    LaunchedEffect(token) { vm.loadIfLoggedIn() }
+    LaunchedEffect(token, malLoggedIn) { vm.loadIfLoggedIn() }
 
     if (captionAppearanceVisible) {
         CaptionAppearanceDialog(
@@ -149,7 +151,7 @@ fun SettingsScreen(
     fun setWatchlistSync(enabled: Boolean) {
         SettingsStore.setSyncSavedToAniList(enabled)
         if (enabled) {
-            LibraryStore.syncSavedToAniList()
+            LibraryStore.syncSavedToRemote()
             vm.loadIfLoggedIn(refresh = true)
         }
     }
@@ -226,7 +228,7 @@ fun SettingsScreen(
             }
             item { SectionDivider() }
 
-            item { SettingsSectionTitle("AniList") }
+            item { SettingsSectionTitle("List sync (AniList / MyAnimeList)") }
             item { SettingSwitch("Sync episode progress", "Update watched episodes while playing", autoSync, SettingsStore::setAutoSyncAniList) }
             item {
                 SettingSwitch(
@@ -254,7 +256,7 @@ fun SettingsScreen(
                 SettingsAction(
                     title = if (malExportBusy) "Preparing MyAnimeList export..." else "Export MyAnimeList XML",
                     icon = { Icon(Icons.Default.Download, contentDescription = null) },
-                    enabled = !malExportBusy && (token == null || profile != null),
+                    enabled = !malExportBusy && ((token == null && !malLoggedIn) || profile != null),
                     onClick = ::exportMal,
                 )
             }

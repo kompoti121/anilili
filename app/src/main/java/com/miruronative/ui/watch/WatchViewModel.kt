@@ -7,7 +7,7 @@ import com.miruronative.data.AppGraph
 import com.miruronative.data.ProviderCatalog
 import com.miruronative.data.library.HistoryEntry
 import com.miruronative.data.library.LibraryStore
-import com.miruronative.data.auth.AuthManager
+import com.miruronative.data.auth.AccountService
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.data.settings.DEFAULT_PREFERRED_PROVIDER
 import com.miruronative.data.model.Category
@@ -369,16 +369,22 @@ class WatchViewModel : ViewModel() {
     }
 
     private fun maybeSyncAniListProgress(episodeNumber: Double, positionMs: Long, durationMs: Long) {
-        if (!AuthManager.isLoggedIn || !SettingsStore.autoSyncAniList.value) return
+        val service = AccountService.active ?: return
+        if (!SettingsStore.autoSyncAniList.value) return
         if (!shouldSyncAniListProgress(episodeNumber, positionMs, durationMs)) return
         val episode = episodeNumber.toInt()
         if (!syncedAniListEpisodes.add(episode)) return
         viewModelScope.launch {
-            runCatching { repo.saveAniListProgress(anilistId, episode, totalEpisodes) }
+            runCatching {
+                when (service) {
+                    AccountService.ANILIST -> repo.saveAniListProgress(anilistId, episode, totalEpisodes)
+                    AccountService.MAL -> repo.saveMalProgress(anilistId, episode, totalEpisodes)
+                }
+            }
                 .onFailure {
                     syncedAniListEpisodes.remove(episode)
                     DiagnosticsLog.throwable(
-                        "Watch AniList progress sync failed id=$anilistId episode=${fmt(episodeNumber)}",
+                        "Watch ${service.label} progress sync failed id=$anilistId episode=${fmt(episodeNumber)}",
                         it,
                     )
                 }
