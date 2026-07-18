@@ -619,7 +619,20 @@ fun EmbedWebView(
                     lastRequestedUrl.value = activeUrl
                     navigationLock.locked = false // allow the new embed's own redirect chain
                     DiagnosticsLog.event("EmbedWebView loadUrl host=${activeUrl.hostOrNone()} headers=${headers.keys.joinToString()}")
-                    web.loadUrl(activeUrl, headers)
+                    if (activeUrl.requiresAllAnimeIframeShell(activeReferer)) {
+                        // OK.ru returns a blank document when opened as a top-level WebView page.
+                        // The captured browser flow loads it as an iframe from AllAnime, which
+                        // also supplies the required iframe navigation metadata and referer.
+                        web.loadDataWithBaseURL(
+                            activeReferer,
+                            allAnimeIframeShell(activeUrl),
+                            "text/html",
+                            "UTF-8",
+                            null,
+                        )
+                    } else {
+                        web.loadUrl(activeUrl, headers)
+                    }
                 }
             },
             onRelease = { view ->
@@ -893,6 +906,21 @@ fun EmbedWebView(
             )
         }
     }
+}
+
+private fun String.requiresAllAnimeIframeShell(referer: String?): Boolean {
+    val host = runCatching { Uri.parse(this).host }.getOrNull()?.lowercase()?.removePrefix("www.")
+    val refererHost = runCatching { Uri.parse(referer).host }.getOrNull()?.lowercase()?.removePrefix("www.")
+    return host == "ok.ru" && refererHost == "allanime.day"
+}
+
+private fun allAnimeIframeShell(url: String): String {
+    val escaped = url
+        .replace("&", "&amp;")
+        .replace("\"", "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    return """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#000;overflow:hidden"><iframe src="$escaped" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen referrerpolicy="no-referrer-when-downgrade" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe></body></html>"""
 }
 
 @Composable

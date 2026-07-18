@@ -18,13 +18,13 @@ object ProviderCatalog {
 
     // Anivexa providers we query (reliable, self-hosted sources).
     val anivexaProviders = listOf(
-        "senshi", "anibd", "anikoto", "allanime", "animekai", "reanime", "anizone", "animegg", "anineko", "2dhive",
+        "senshi", "anibd", "anikoto", "kaa", "allanime", "animekai", "reanime", "anizone", "animegg", "anineko", "2dhive",
     )
 
     // The consistently quick Anivexa lookups (API-backed, not full-page scrapers). Raced as an
     // early partial catalog when the Miruro pipe is down or slow, so playback never waits for
     // the 15-second stragglers; the remaining providers still merge in behind.
-    val fastAnivexaProviders = listOf("senshi", "anibd", "anikoto")
+    val fastAnivexaProviders = listOf("senshi", "anibd", "anikoto", "kaa")
 
     // Providers that consistently resolve and start quickly: the Miruro pipe's native HLS set
     // (one pipe call away) and the API-backed Anivexa lookups. Embeds and full-page scrapers
@@ -59,6 +59,7 @@ object ProviderCatalog {
         "2dhive" -> "2Dhive"
         "allanime" -> "AllAnime"
         "animekai" -> "AnimeKai"
+        "kaa" -> "KickAssAnime"
         else -> provider.replaceFirstChar { it.uppercase() }
     }
 }

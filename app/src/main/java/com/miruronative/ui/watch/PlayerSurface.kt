@@ -323,8 +323,8 @@ fun PlayerSurface(
                     DiagnosticsLog.event("PlayerSurface tracks ${tracks.diagnosticSummary()}")
                     tracksRevision++
                     val mediaId = activeController.currentMediaItem?.mediaId ?: return
-                    if (currentProvider != "reanime" || audioPreferenceAppliedFor == mediaId) return
-                    if (applyReanimeAudioPreference(activeController, currentCategory)) {
+                    if (currentProvider !in MULTI_AUDIO_PROVIDERS || audioPreferenceAppliedFor == mediaId) return
+                    if (applyCategoryAudioPreference(activeController, currentCategory, currentProvider)) {
                         audioPreferenceAppliedFor = mediaId
                     }
                 }
@@ -1080,7 +1080,7 @@ private fun trackOptions(
             }
     }
 
-private fun applyAudioTrack(controller: MediaController, option: TrackOption?) {
+private fun applyAudioTrack(controller: Player, option: TrackOption?) {
     val builder = controller.trackSelectionParameters.buildUpon()
         .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
         .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
@@ -1097,7 +1097,7 @@ private fun applyAudioTrack(controller: MediaController, option: TrackOption?) {
     )
 }
 
-private fun applyReanimeAudioPreference(controller: MediaController, category: String): Boolean {
+internal fun applyCategoryAudioPreference(controller: Player, category: String, provider: String): Boolean {
     val wantsDub = category.equals("dub", ignoreCase = true)
     val options = controller.currentTracks.groups
         .filter { it.type == C.TRACK_TYPE_AUDIO && it.isSupported }
@@ -1116,16 +1116,18 @@ private fun applyReanimeAudioPreference(controller: MediaController, category: S
         }
     if (options.size < 2) return true
     val selected = options.firstOrNull { it.selected }
-    val preferred = options.minByOrNull { reanimeAudioRank(it.name, wantsDub) }
-        ?.takeIf { reanimeAudioRank(it.name, wantsDub) < 50 }
+    val preferred = options.minByOrNull { categoryAudioRank(it.name, wantsDub) }
+        ?.takeIf { categoryAudioRank(it.name, wantsDub) < 50 }
         ?: return true
     if (selected?.trackGroup == preferred.trackGroup && selected.trackIndex == preferred.trackIndex) return true
     applyAudioTrack(controller, preferred)
-    DiagnosticsLog.event("PlayerSurface ReAnime audio selected category=$category name=${preferred.name.take(80)}")
+    DiagnosticsLog.event(
+        "PlayerSurface multi-audio selected provider=$provider category=$category name=${preferred.name.take(80)}",
+    )
     return true
 }
 
-private fun reanimeAudioRank(name: String, wantsDub: Boolean): Int {
+internal fun categoryAudioRank(name: String, wantsDub: Boolean): Int {
     val lower = name.lowercase()
     return if (wantsDub) {
         when {
@@ -1141,6 +1143,8 @@ private fun reanimeAudioRank(name: String, wantsDub: Boolean): Int {
         }
     }
 }
+
+private val MULTI_AUDIO_PROVIDERS = setOf("reanime", "kaa")
 
 private fun applyTextTrack(controller: MediaController, option: TrackOption?) {
     val builder = controller.trackSelectionParameters.buildUpon()

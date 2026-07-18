@@ -58,6 +58,7 @@ class AnivexaClient(
     private val animeKai = AnimeKaiProvider(client)
     private val senshi = SenshiProvider(client, json)
     private val aniBd = AniBdProvider(client, json)
+    private val kickAssAnime = KickAssAnimeProvider(client, json)
 
     suspend fun getEpisodes(
         anilistId: Int,
@@ -111,6 +112,7 @@ class AnivexaClient(
             "anikoto" -> anikoto(media, request.audio, request.episode)
             "allanime" -> allAnime.sources(media, request.audio, request.episode)
             "animekai" -> animeKai.sources(media, request.audio, request.episode)
+            "kaa" -> kickAssAnime.sources(media, request.audio, request.episode)
             "reanime" -> reanime(media, request.audio, request.episode)
             "anizone" -> anizone(media, request.episode)
             "animegg" -> animegg(media, request.audio, request.episode)
@@ -144,6 +146,7 @@ class AnivexaClient(
         "anikoto" -> anikotoAvailability(media, count)
         "allanime" -> allAnime.episodeAvailability(media)
         "animekai" -> animeKai.episodeAvailability(media)
+        "kaa" -> kickAssAnime.episodeAvailability(media)
         "reanime" -> reanimeAvailability(media)
         "anizone" -> anizoneAvailability(media, count)
         "animegg" -> animeGgAvailability(media)
