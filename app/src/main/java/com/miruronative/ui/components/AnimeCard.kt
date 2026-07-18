@@ -26,6 +26,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,7 +53,7 @@ fun AnimeCard(
     Column(
         modifier = modifier
             .focusHighlight()
-            .clickable(onClick = onClick),
+            .clickable(onClickLabel = "Open details", role = Role.Button, onClick = onClick),
     ) {
         Box(
             Modifier
@@ -59,9 +62,10 @@ fun AnimeCard(
                 .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
+            // Decorative: the title text below is part of the same merged semantics node.
             AsyncImage(
                 model = media.coverImage.best,
-                contentDescription = media.title.preferred,
+                contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
@@ -100,6 +104,7 @@ private fun AdultBadge(modifier: Modifier = Modifier) {
     Text(
         "18+",
         modifier = modifier
+            .semantics { contentDescription = "Adult content" }
             .clip(RoundedCornerShape(5.dp))
             .background(MaterialTheme.colorScheme.error)
             .padding(horizontal = 6.dp, vertical = 3.dp),
@@ -114,6 +119,7 @@ private fun AdultBadge(modifier: Modifier = Modifier) {
 fun RatingBadge(score: Int, modifier: Modifier = Modifier) {
     Row(
         modifier
+            .semantics { contentDescription = "Rated $score percent" }
             .clip(RoundedCornerShape(6.dp))
             .background(Color.Black.copy(alpha = .78f))
             .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .6f), RoundedCornerShape(6.dp))

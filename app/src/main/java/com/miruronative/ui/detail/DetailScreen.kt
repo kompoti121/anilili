@@ -123,7 +123,7 @@ fun DetailScreen(
                         ) {
                             Icon(
                                 if (saved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                                contentDescription = "Watchlist",
+                                contentDescription = if (saved) "Remove from watchlist" else "Add to watchlist",
                                 tint = if (saved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                             )
                         }

@@ -114,7 +114,8 @@ internal fun PlayerControlsScaffold(
                 colors = whiteSliderColors(),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(28.dp),
+                    .height(28.dp)
+                    .semantics { contentDescription = "Seek" },
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),

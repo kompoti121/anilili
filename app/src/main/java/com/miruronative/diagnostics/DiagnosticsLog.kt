@@ -221,7 +221,7 @@ object DiagnosticsLog {
 
     fun share(context: Context): Result<Unit> = runCatching {
         event("diagnostics share requested")
-        val snapshot = writeShareSnapshot(context.applicationContext)
+        val snapshot = createShareSnapshot(context.applicationContext)
         val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
@@ -267,7 +267,37 @@ object DiagnosticsLog {
         )
     }
 
-    private fun writeShareSnapshot(context: Context): File {
+    /**
+     * TV path C: copies the snapshot into the device's public Downloads so it can also be pulled
+     * with a file manager or over USB. Timestamped so repeated shares don't shadow each other.
+     */
+    fun saveToDownloads(context: Context, snapshot: File): Result<String> = runCatching {
+        val name = "anilili-diagnostics-" +
+            SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".txt"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = context.contentResolver
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+            }
+            val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: error("Couldn't create a Downloads entry")
+            resolver.openOutputStream(uri)?.use { out ->
+                snapshot.inputStream().use { it.copyTo(out) }
+            } ?: error("Couldn't write to Downloads")
+        } else {
+            @Suppress("DEPRECATION")
+            val dir = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS,
+            )
+            dir.mkdirs()
+            snapshot.copyTo(File(dir, name), overwrite = true)
+        }
+        event("diagnostics saved to Downloads/$name")
+        "Downloads/$name"
+    }.onFailure { throwable("diagnostics downloads save failed", it) }
+
+    fun createShareSnapshot(context: Context): File {
         val dir = File(context.cacheDir, LOG_DIR).apply { mkdirs() }
         val snapshot = File(dir, SHARE_FILE)
         synchronized(lock) {

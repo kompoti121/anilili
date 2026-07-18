@@ -48,6 +48,8 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
@@ -268,7 +270,7 @@ internal fun MediaVolumeSlider(
                 onInteract()
             },
         ) {
-            Icon(volumeIcon(volume), contentDescription = "Volume", tint = Color.White)
+            Icon(volumeIcon(volume), contentDescription = if (volume > 0.001f) "Mute" else "Unmute", tint = Color.White)
         }
         Slider(
             value = volume,
@@ -279,7 +281,7 @@ internal fun MediaVolumeSlider(
                 onInteract()
             },
             colors = whiteSliderColors(),
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).semantics { contentDescription = "Volume" },
         )
         if (showPercentLabel) {
             Text(

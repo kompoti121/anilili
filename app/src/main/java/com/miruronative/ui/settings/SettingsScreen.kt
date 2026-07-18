@@ -102,6 +102,7 @@ fun SettingsScreen(
     var malExportBusy by remember { mutableStateOf(false) }
     var malExportMessage by remember { mutableStateOf<String?>(null) }
     var diagnosticsMessage by remember { mutableStateOf<String?>(null) }
+    var tvDiagnosticsVisible by remember { mutableStateOf(false) }
     var captionAppearanceVisible by remember { mutableStateOf(false) }
     var cacheUsage by remember { mutableStateOf<Long?>(null) }
     var cacheClearing by remember { mutableStateOf(false) }
@@ -110,6 +111,10 @@ fun SettingsScreen(
     LaunchedEffect(token, malLoggedIn) { vm.loadIfLoggedIn() }
     LaunchedEffect(Unit) {
         cacheUsage = withContext(Dispatchers.IO) { CacheManager.usageBytes(context) }
+    }
+
+    if (tvDiagnosticsVisible) {
+        TvDiagnosticsShareDialog(onDismiss = { tvDiagnosticsVisible = false })
     }
 
     if (captionAppearanceVisible) {
@@ -344,8 +349,13 @@ fun SettingsScreen(
                     enabled = true,
                     onClick = {
                         diagnosticsMessage = null
-                        DiagnosticsLog.share(context)
-                            .onFailure { diagnosticsMessage = it.message ?: "Couldn't share diagnostics" }
+                        if (device.isTv) {
+                            // TV has no ACTION_SEND targets — share over the LAN + Downloads instead.
+                            tvDiagnosticsVisible = true
+                        } else {
+                            DiagnosticsLog.share(context)
+                                .onFailure { diagnosticsMessage = it.message ?: "Couldn't share diagnostics" }
+                        }
                     },
                 )
             }

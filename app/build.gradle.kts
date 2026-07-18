@@ -22,8 +22,8 @@ android {
         applicationId = "com.miruronative"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20
-        versionName = "0.1.19"
+        versionCode = 21
+        versionName = "0.1.20"
     }
 
     signingConfigs {
@@ -117,5 +117,6 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.zxing.core)
     testImplementation(libs.junit)
 }

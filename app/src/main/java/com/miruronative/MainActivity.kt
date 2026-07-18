@@ -499,6 +499,7 @@ private fun AppNavHost(
                 arguments = listOf(navArgument(Routes.Arg.ID) { type = NavType.IntType }),
             ) { entry ->
                 val id = entry.arguments?.getInt(Routes.Arg.ID) ?: return@composable
+                val deviceProfile = LocalAppDeviceProfile.current
                 LaunchedEffect(id) { DiagnosticsLog.event("Route DETAIL content entered id=$id") }
                 DetailScreen(
                     animeId = id,
@@ -507,7 +508,14 @@ private fun AppNavHost(
                         if (relatedId != id) nav.navigate(Routes.detail(relatedId))
                     },
                     onPlay = { provider, category, episode ->
-                        nav.navigate(Routes.watch(id, provider, category, episode))
+                        // TV: Watch lands on the episode grid (playback starts inline) so the
+                        // user picks an episode; going straight to fullscreen autoplay left no
+                        // way to choose one. Phones keep the direct-to-player behavior.
+                        if (deviceProfile.isTv) {
+                            nav.navigate(Routes.episodes(id, provider, category, episode))
+                        } else {
+                            nav.navigate(Routes.watch(id, provider, category, episode))
+                        }
                     },
                     onSeasonWatch = { seasonId ->
                         val saved = com.miruronative.data.library.LibraryStore.historyFor(seasonId)
