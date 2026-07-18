@@ -201,8 +201,19 @@ private fun DetailContent(
                         TitleMetadata(info)
                         GenreRow(info.genres, Modifier.padding(top = 10.dp))
                         WatchButton(resume, canWatch, resolving, onWatch, Modifier.padding(top = 12.dp))
-                        if (data.loadingMore && canWatch) {
-                            InlineLoadingRow("Loading more servers…", Modifier.padding(top = 6.dp))
+                        if (data.loadingMore) {
+                            InlineLoadingRow(
+                                if (canWatch) "Loading more servers…" else "Looking for servers…",
+                                Modifier.padding(top = 6.dp),
+                            )
+                        }
+                        data.episodesError?.let { message ->
+                            Text(
+                                message,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
                         }
                         Description(info.description, Modifier.padding(top = 12.dp))
                     }
@@ -214,11 +225,20 @@ private fun DetailContent(
             item {
                 Column {
                     WatchButton(resume, canWatch, resolving, onWatch, Modifier.padding(horizontal = pad, vertical = 8.dp))
-                    // Miruro's fast sources are already playable; the rest are still loading in.
-                    if (data.loadingMore && canWatch) {
+                    // Shown while servers are still loading — including before any source has been
+                    // found, where a blank section would otherwise read as a broken page.
+                    if (data.loadingMore) {
                         InlineLoadingRow(
-                            "Loading more servers…",
+                            if (canWatch) "Loading more servers…" else "Looking for servers…",
                             Modifier.fillMaxWidth().padding(horizontal = pad, vertical = 4.dp),
+                        )
+                    }
+                    data.episodesError?.let { message ->
+                        Text(
+                            message,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = pad, vertical = 4.dp),
                         )
                     }
                 }
