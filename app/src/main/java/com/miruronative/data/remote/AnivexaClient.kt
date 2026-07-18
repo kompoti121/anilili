@@ -59,7 +59,11 @@ class AnivexaClient(
     private val senshi = SenshiProvider(client, json)
     private val aniBd = AniBdProvider(client, json)
 
-    suspend fun getEpisodes(anilistId: Int, seedMedia: Media? = null): EpisodesResult = withContext(Dispatchers.IO) {
+    suspend fun getEpisodes(
+        anilistId: Int,
+        seedMedia: Media? = null,
+        providers: List<String> = ProviderCatalog.anivexaProviders,
+    ): EpisodesResult = withContext(Dispatchers.IO) {
         // The caller (repository) has usually already fetched this AniList Media through the shared
         // 24h cache; reuse it so a cold catalog doesn't fire a second, rate-limit-exposed request.
         seedMedia?.let { mediaCache[anilistId] = it }
@@ -73,7 +77,7 @@ class AnivexaClient(
         }
 
         coroutineScope {
-            val lookups = ProviderCatalog.anivexaProviders.associateWith { provider ->
+            val lookups = providers.associateWith { provider ->
                 async {
                     runCatching {
                         withTimeout(CATALOG_TIMEOUT_MS) { providerAvailability(provider, media, count) }
@@ -83,7 +87,7 @@ class AnivexaClient(
                 }
             }
             EpisodesResult(
-                ProviderCatalog.anivexaProviders.mapNotNull { provider ->
+                providers.mapNotNull { provider ->
                     lookups.getValue(provider).await()?.let { availability ->
                         ProviderData(
                             name = provider,

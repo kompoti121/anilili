@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -93,6 +94,7 @@ import com.miruronative.data.model.StreamItem
 import com.miruronative.data.model.SubtitleItem
 import com.miruronative.data.settings.CaptionEdgeStyle
 import com.miruronative.data.settings.CaptionStyle
+import com.miruronative.data.settings.DefaultQuality
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.playback.PlaybackService
@@ -251,6 +253,7 @@ fun PlayerSurface(
     var activeStream by remember(stream.url) { mutableStateOf(stream) }
     var nextStartPositionMs by remember(stream.url) { mutableLongStateOf(startPositionMs) }
     var playbackIsPlaying by remember { mutableStateOf(false) }
+    var tracksRevision by remember { mutableIntStateOf(0) }
     val nativeQualityStreams = remember(stream.url, qualityStreams) {
         (listOf(stream) + qualityStreams)
             .filterNot(StreamItem::isEmbed)
@@ -318,6 +321,7 @@ fun PlayerSurface(
 
                 override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
                     DiagnosticsLog.event("PlayerSurface tracks ${tracks.diagnosticSummary()}")
+                    tracksRevision++
                     val mediaId = activeController.currentMediaItem?.mediaId ?: return
                     if (currentProvider != "reanime" || audioPreferenceAppliedFor == mediaId) return
                     if (applyReanimeAudioPreference(activeController, currentCategory)) {
@@ -420,6 +424,13 @@ fun PlayerSurface(
         runCatching { tvPlayPauseFocus.requestFocus() }
     }
     val screenReaderActive = rememberScreenReaderActive()
+    // TalkBack users can't discover the hidden control row through a key press, so present it
+    // as soon as the fullscreen player opens instead of waiting for the semantic reveal action.
+    LaunchedEffect(screenReaderActive, focusPlayerOnStart, activeStream.url) {
+        if (device.isTv && screenReaderActive && focusPlayerOnStart) {
+            tvControlsVisible = true
+        }
+    }
     LaunchedEffect(tvControlsVisible, tvControlsInteraction, focusPlayerOnStart, screenReaderActive) {
         if (!focusPlayerOnStart) {
             tvControlsVisible = false
@@ -433,8 +444,10 @@ fun PlayerSurface(
         tvControlsVisible = false
         runCatching { tvPlayerFocus.requestFocus() }
     }
-    LaunchedEffect(activeStream.url, playerView, device.isTv, focusPlayerOnStart) {
-        if (device.isTv && focusPlayerOnStart && playerView != null) {
+    LaunchedEffect(activeStream.url, playerView, device.isTv, focusPlayerOnStart, screenReaderActive) {
+        // Under a screen reader the control row is auto-shown and focused; reclaiming focus for
+        // the player surface would pull TalkBack away from the controls it just landed on.
+        if (device.isTv && focusPlayerOnStart && playerView != null && !screenReaderActive) {
             delay(32)
             runCatching { tvPlayerFocus.requestFocus() }
         }
@@ -489,6 +502,55 @@ fun PlayerSurface(
     }
     val captionStyle by SettingsStore.captionStyle.collectAsState()
     var pinnedVideoHeight by remember(controller, stream.url) { mutableStateOf<Int?>(null) }
+    fun changeVideoHeight(activeController: MediaController, height: Int?): Boolean {
+        val applied = when {
+            height == null -> {
+                clearVideoSelection(activeController)
+                if (activeStream.url != stream.url) {
+                    nextStartPositionMs = activeController.currentPosition.coerceAtLeast(0)
+                    activeStream = stream
+                }
+                DiagnosticsLog.event("PlayerSurface quality selection mode=auto")
+                true
+            }
+            activeController.hasVideoHeight(height) -> applyVideoHeight(activeController, height)
+            else -> {
+                val source = nativeQualityStreams.firstOrNull { it.declaredVideoHeight() == height }
+                if (source == null) {
+                    DiagnosticsLog.event("PlayerSurface quality selection rejected height=$height unavailable")
+                    false
+                } else {
+                    clearVideoSelection(activeController)
+                    nextStartPositionMs = activeController.currentPosition.coerceAtLeast(0)
+                    activeStream = source
+                    DiagnosticsLog.event(
+                        "PlayerSurface quality selection mode=manual height=$height " +
+                            "source=${source.typeLabel()} host=${source.host()}",
+                    )
+                    true
+                }
+            }
+        }
+        if (applied) pinnedVideoHeight = height
+        return applied
+    }
+    val defaultQuality by SettingsStore.defaultQuality.collectAsState()
+    var defaultQualityApplied by remember(stream.url) { mutableStateOf(false) }
+    LaunchedEffect(controller, tracksRevision, defaultQuality) {
+        val activeController = controller ?: return@LaunchedEffect
+        if (defaultQualityApplied || pinnedVideoHeight != null) return@LaunchedEffect
+        if (defaultQuality == DefaultQuality.AUTO) return@LaunchedEffect
+        // The controller is persistent across episodes, so its tracks may still describe the
+        // previous media item; only apply once it is actually reporting this stream.
+        if (activeController.currentMediaItem?.mediaId != activeStream.url) return@LaunchedEffect
+        val heights = availableVideoHeights(activeController, nativeQualityStreams)
+        val target = defaultQuality.pickHeight(heights) ?: return@LaunchedEffect
+        defaultQualityApplied = true
+        DiagnosticsLog.event(
+            "PlayerSurface default quality=${defaultQuality.storedValue} target=${target}p heights=$heights",
+        )
+        changeVideoHeight(activeController, target)
+    }
     var seekFlash by remember { mutableIntStateOf(0) } // -10 / +10, 0 = hidden
     var seekFlashTick by remember { mutableIntStateOf(0) }
     val autoSkipIntroOutro by SettingsStore.autoSkipIntroOutro.collectAsState()
@@ -735,51 +797,11 @@ fun PlayerSurface(
 
         if (settingsExpanded && controller != null) {
             val activeController = controller!!
-            val changeVideoHeight: (Int?) -> Boolean = { height ->
-                val applied = when {
-                    height == null -> {
-                        clearVideoSelection(activeController)
-                        if (activeStream.url != stream.url) {
-                            nextStartPositionMs = activeController.currentPosition.coerceAtLeast(0)
-                            activeStream = stream
-                        }
-                        DiagnosticsLog.event("PlayerSurface quality selection mode=auto")
-                        true
-                    }
-                    activeController.hasVideoHeight(height) -> applyVideoHeight(activeController, height)
-                    else -> {
-                        val source = nativeQualityStreams.firstOrNull { it.declaredVideoHeight() == height }
-                        if (source == null) {
-                            DiagnosticsLog.event("PlayerSurface quality selection rejected height=$height unavailable")
-                            false
-                        } else {
-                            clearVideoSelection(activeController)
-                            nextStartPositionMs = activeController.currentPosition.coerceAtLeast(0)
-                            activeStream = source
-                            DiagnosticsLog.event(
-                                "PlayerSurface quality selection mode=manual height=$height " +
-                                    "source=${source.typeLabel()} host=${source.host()}",
-                            )
-                            true
-                        }
-                    }
-                }
-                if (applied) pinnedVideoHeight = height
-                applied
-            }
-            val trackHeights = (
-                activeController.currentTracks.groups
-                    .filter { it.type == C.TRACK_TYPE_VIDEO && it.isSupported }
-                    .flatMap { group ->
-                        (0 until group.length).filter(group::isTrackSupported)
-                            .map { group.getTrackFormat(it).height }
-                    }
-                    .filter { it > 0 } + nativeQualityStreams.mapNotNull(StreamItem::declaredVideoHeight)
-                ).distinct().sortedDescending()
+            val trackHeights = availableVideoHeights(activeController, nativeQualityStreams)
             val qualityOptions = buildList {
-                add(PlayerQualityOption("Auto", pinnedVideoHeight == null) { changeVideoHeight(null) })
+                add(PlayerQualityOption("Auto", pinnedVideoHeight == null) { changeVideoHeight(activeController, null) })
                 trackHeights.forEach { height ->
-                    add(PlayerQualityOption("${height}p", pinnedVideoHeight == height) { changeVideoHeight(height) })
+                    add(PlayerQualityOption("${height}p", pinnedVideoHeight == height) { changeVideoHeight(activeController, height) })
                 }
             }
             val audioTracks = trackOptions(activeController, trackNameProvider, C.TRACK_TYPE_AUDIO)
@@ -919,7 +941,7 @@ fun PlayerSurface(
         action?.let { (label, onClick) ->
             val controlsVisible = if (device.isTv) tvControlsVisible else phoneControlsVisible
             val actionModifier = if (controlsVisible) {
-                Modifier.align(Alignment.TopCenter).padding(top = 16.dp)
+                Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 16.dp)
             } else {
                 Modifier.align(Alignment.BottomStart).padding(start = 24.dp, bottom = 24.dp)
             }
@@ -973,6 +995,20 @@ private fun CastButton(modifier: Modifier = Modifier) {
         },
     )
 }
+
+/** Heights offered by the loaded tracks plus any alternate per-quality source streams. */
+private fun availableVideoHeights(
+    controller: MediaController,
+    qualityStreams: List<StreamItem>,
+): List<Int> = (
+    controller.currentTracks.groups
+        .filter { it.type == C.TRACK_TYPE_VIDEO && it.isSupported }
+        .flatMap { group ->
+            (0 until group.length).filter(group::isTrackSupported)
+                .map { group.getTrackFormat(it).height }
+        }
+        .filter { it > 0 } + qualityStreams.mapNotNull(StreamItem::declaredVideoHeight)
+    ).distinct().sortedDescending()
 
 private fun applyVideoHeight(controller: MediaController, height: Int?): Boolean {
     val builder = controller.videoSelectionBuilder()

@@ -194,6 +194,13 @@ fun EmbedWebView(
         runCatching { tvPlayPauseFocus.requestFocus() }
     }
     val screenReaderActive = rememberScreenReaderActive()
+    // TalkBack users can't discover the hidden control row through a key press, so present it
+    // as soon as the fullscreen player opens instead of waiting for the semantic reveal action.
+    LaunchedEffect(screenReaderActive, focusPlayerOnStart, activeUrl) {
+        if (device.isTv && screenReaderActive && focusPlayerOnStart) {
+            tvControlsVisible = true
+        }
+    }
     LaunchedEffect(tvControlsVisible, tvControlsInteraction, webView, focusPlayerOnStart, screenReaderActive) {
         if (!focusPlayerOnStart) {
             tvControlsVisible = false
@@ -208,8 +215,11 @@ fun EmbedWebView(
         webView?.requestFocus()
     }
 
-    LaunchedEffect(activeUrl, webView, device.isTv, focusPlayerOnStart, hasPreviousEpisode, hasNextEpisode) {
+    LaunchedEffect(activeUrl, webView, device.isTv, focusPlayerOnStart, hasPreviousEpisode, hasNextEpisode, screenReaderActive) {
         if (!device.isTv || !focusPlayerOnStart || webView == null) return@LaunchedEffect
+        // Under a screen reader the control row is auto-shown and focused; grabbing focus for
+        // the WebView here would dump TalkBack back into the embed's web content.
+        if (screenReaderActive) return@LaunchedEffect
         delay(250)
         runCatching { webView?.requestFocus() }
     }

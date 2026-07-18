@@ -28,6 +28,13 @@ import kotlinx.coroutines.withTimeoutOrNull
 /** How long a ready stream waits on the AniSkip lookup before starting without markers. */
 private const val ANISKIP_WAIT_MS = 2_500L
 
+/**
+ * How long the initial load waits on the Miruro pipe before proceeding with the fast Anivexa
+ * catalog alone. A healthy warm pipe answers well under this; a Cloudflare-dead one takes 15 s+,
+ * which used to be dead time on the loading screen. Miruro still merges in if it answers later.
+ */
+private const val MIRURO_CATALOG_WAIT_MS = 8_000L
+
 data class WatchData(
     val episodes: List<EpisodeItem>,
     val currentIndex: Int,
@@ -65,6 +72,10 @@ class WatchViewModel : ViewModel() {
     private val _state = MutableStateFlow<UiState<WatchData>>(UiState.Loading)
     val state = _state.asStateFlow()
 
+    /** Live status line for the initial loading screen ("main source is down, trying others…"). */
+    private val _loadingStatus = MutableStateFlow<String?>(null)
+    val loadingStatus = _loadingStatus.asStateFlow()
+
     private var anilistId = 0
     private var category = Category.SUB
     private var globalPreferredProvider = DEFAULT_PREFERRED_PROVIDER
@@ -80,6 +91,7 @@ class WatchViewModel : ViewModel() {
     private val failedStreamUrls = mutableSetOf<String>()
     private var resolveJob: Job? = null
     private var anivexaMergeJob: Job? = null
+    private var miruroLateMergeJob: Job? = null
     private var mergedIncludesAnivexa = false
     private var mergedEpisodes = EpisodesResult(emptyList())
 
@@ -101,8 +113,10 @@ class WatchViewModel : ViewModel() {
 
         resolveJob?.cancel()
         anivexaMergeJob?.cancel()
+        miruroLateMergeJob?.cancel()
         resolveJob = viewModelScope.launch {
             _state.value = UiState.Loading
+            _loadingStatus.value = null
             try {
                 SettingsStore.awaitLoaded()
                 val storedPreferred = SettingsStore.preferredProvider.value
@@ -112,20 +126,50 @@ class WatchViewModel : ViewModel() {
                     "Watch preferred server route=$providerName stored=$storedPreferred selected=$preferred",
                 )
                 DiagnosticsLog.event("Watch episodes load start id=$id")
-                // Fast path: start from the Miruro pipe alone so playback isn't held behind the
-                // slower multi-provider Anivexa catalog. The Anivexa providers fold in afterwards
-                // via launchAnivexaMerge. Only wait on the full catalog when Miruro yields nothing,
-                // or the requested provider is an Anivexa one (e.g. resuming on such a server).
-                val miruro = runCatching { repo.miruroEpisodes(id) }
-                    .onFailure { DiagnosticsLog.throwable("Watch miruro episodes failed id=$id", it) }
-                    .getOrDefault(EpisodesResult(emptyList()))
+                // Fast path: both catalogs race from the start. The fast Anivexa subset (plus the
+                // preferred server) is already in flight if the Miruro pipe turns out to be slow
+                // or down, and the Miruro wait is capped so a dead pipe (Cloudflare timeout)
+                // can't hold the loading screen hostage — a late Miruro answer merges in behind.
+                // The remaining slow Anivexa scrapers fold in via launchAnivexaMerge.
+                val fastCatalog = async {
+                    runCatching { repo.fastAnivexaEpisodes(id, setOf(preferred)) }
+                        .onFailure { DiagnosticsLog.throwable("Watch fast anivexa episodes failed id=$id", it) }
+                        .getOrDefault(EpisodesResult(emptyList()))
+                }
+                val miruroDeferred = async { runCatching { repo.miruroEpisodes(id) } }
+                val miruroResult = withTimeoutOrNull(MIRURO_CATALOG_WAIT_MS) { miruroDeferred.await() }
+                miruroResult?.exceptionOrNull()?.let {
+                    DiagnosticsLog.throwable("Watch miruro episodes failed id=$id", it)
+                }
+                if (miruroResult == null) {
+                    DiagnosticsLog.event(
+                        "Watch miruro episodes still pending after ${MIRURO_CATALOG_WAIT_MS}ms id=$id",
+                    )
+                }
+                val miruro = miruroResult?.getOrNull() ?: EpisodesResult(emptyList())
+                if (miruro.isEmpty) {
+                    _loadingStatus.value =
+                        "The main source looks down right now. Trying other sources…"
+                }
                 val preferredIsAnivexa =
                     ProviderCatalog.sourceOf(preferred) == ProviderCatalog.Source.ANIVEXA
                 val merged = if (!miruro.isEmpty && !preferredIsAnivexa) {
+                    // The full Anivexa catalog loads via launchAnivexaMerge anyway; drop the
+                    // now-redundant fast subset instead of hitting those providers twice.
+                    fastCatalog.cancel()
                     miruro
                 } else {
-                    repo.episodes(id).also { mergedIncludesAnivexa = true }
+                    val fast = fastCatalog.await()
+                    if (fast.isEmpty) {
+                        repo.episodes(id).also { mergedIncludesAnivexa = true }
+                    } else {
+                        DiagnosticsLog.event(
+                            "Watch fast catalog id=$id providers=" + fast.providerNames.joinToString(),
+                        )
+                        repo.mergeProviders(miruro, fast)
+                    }
                 }
+                if (miruroResult == null) launchMiruroLateMerge(id, miruroDeferred)
                 DiagnosticsLog.event(
                     "Watch episodes load success id=$id providers=" +
                         merged.providers.joinToString { provider ->
@@ -161,13 +205,44 @@ class WatchViewModel : ViewModel() {
                 )
                 if (spine.isEmpty()) error("No episodes for this title")
                 val startNumber = episodeNumber.toDoubleOrNull() ?: spine.first().number
-                resolveAndPlay(startNumber)
+                // Launched before the first resolve so a miss on the partial catalog can await
+                // the remaining servers instead of reporting "no source" prematurely.
                 if (!mergedIncludesAnivexa) launchAnivexaMerge(id)
+                resolveAndPlay(startNumber)
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 DiagnosticsLog.throwable("Watch start failed key=$key", e)
+                _loadingStatus.value = null
                 _state.value = UiState.Error(e.message ?: "Failed to load episode")
             }
+        }
+    }
+
+    /**
+     * When the Miruro pipe outlived its initial wait, keep listening: if it eventually answers,
+     * fold its providers into the catalog so they become selectable, without disturbing playback
+     * that already started on a fast source.
+     */
+    private fun launchMiruroLateMerge(id: Int, deferred: kotlinx.coroutines.Deferred<Result<EpisodesResult>>) {
+        miruroLateMergeJob?.cancel()
+        miruroLateMergeJob = viewModelScope.launch {
+            val late = runCatching { deferred.await() }.getOrNull()?.getOrNull() ?: return@launch
+            if (late.isEmpty) return@launch
+            mergedEpisodes = repo.mergeProviders(late, mergedEpisodes)
+            spine = pickSpine(mergedEpisodes)
+            DiagnosticsLog.event(
+                "Watch miruro late merge applied id=$id providers=" + late.providerNames.joinToString(),
+            )
+            val data = (_state.value as? UiState.Success)?.data ?: return@launch
+            val number = data.current.number
+            val index = spine.indexOfFirst { it.number == number }.coerceAtLeast(0)
+            _state.value = UiState.Success(
+                data.copy(
+                    episodes = spine,
+                    currentIndex = index,
+                    sourceOptions = sourceOptions(number),
+                ),
+            )
         }
     }
 
@@ -231,7 +306,7 @@ class WatchViewModel : ViewModel() {
         val previous = (_state.value as? UiState.Success)?.data
         _state.value = previous?.let { UiState.Success(it.copy(isResolving = true, notice = null)) }
             ?: UiState.Loading
-        val resolved = repo.resolveSources(
+        var resolved = repo.resolveSources(
             anilistId = anilistId,
             number = number,
             preferred = requestedProvider,
@@ -239,8 +314,29 @@ class WatchViewModel : ViewModel() {
             episodes = mergedEpisodes,
             excludedProviders = failedProviders,
         )
+        if (resolved == null && !mergedIncludesAnivexa) {
+            // The quick partial catalog missed; the slower servers may still carry this episode,
+            // so wait for the full merge before declaring no source.
+            DiagnosticsLog.event(
+                "Watch resolve retry pending full catalog id=$anilistId episode=${fmt(number)}",
+            )
+            _loadingStatus.value = "Still looking — checking the remaining servers…"
+            anivexaMergeJob?.join()
+            // Last chance before "no source": the attempt cap only exists to bound mid-playback
+            // fallback latency, so here every remaining server gets a try.
+            resolved = repo.resolveSources(
+                anilistId = anilistId,
+                number = number,
+                preferred = requestedProvider,
+                category = category,
+                episodes = mergedEpisodes,
+                excludedProviders = failedProviders,
+                maxAttempts = Int.MAX_VALUE,
+            )
+        }
         if (resolved == null) {
             aniSkipFallback.cancel()
+            _loadingStatus.value = null
             val message = "No playable source for episode ${fmt(number)} on any server"
             DiagnosticsLog.event("Watch resolve no source id=$anilistId episode=${fmt(number)}")
             _state.value = previous?.let {
@@ -282,6 +378,7 @@ class WatchViewModel : ViewModel() {
                     "${it.diagnosticLabel()}${if (it.isActive) "*" else ""}"
                 },
         )
+        _loadingStatus.value = null
         _state.value = UiState.Success(
             WatchData(
                 episodes = spine,
@@ -445,6 +542,7 @@ class WatchViewModel : ViewModel() {
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 DiagnosticsLog.throwable("Watch resolve failed id=$anilistId episode=${fmt(number)}", e)
+                _loadingStatus.value = null
                 _state.value = UiState.Error(e.message ?: "Failed to load episode")
             }
         }

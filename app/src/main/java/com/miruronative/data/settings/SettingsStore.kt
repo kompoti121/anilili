@@ -35,6 +35,30 @@ enum class MenuLanguage(val storedValue: String) {
     }
 }
 
+enum class DefaultQuality(val storedValue: String, val label: String) {
+    AUTO("auto", "Auto"),
+    HIGHEST("highest", "Highest"),
+    P1080("1080", "1080p"),
+    P720("720", "720p"),
+    P480("480", "480p");
+
+    /** Best matching height from [heights], or null to leave adaptive selection alone. */
+    fun pickHeight(heights: List<Int>): Int? = when (this) {
+        AUTO -> null
+        HIGHEST -> heights.maxOrNull()
+        // Closest height without going over; a low-quality-only source still plays its best.
+        else -> {
+            val target = storedValue.toInt()
+            heights.filter { it <= target }.maxOrNull() ?: heights.minOrNull()
+        }
+    }
+
+    companion object {
+        fun fromStored(value: String?): DefaultQuality =
+            entries.firstOrNull { it.storedValue == value } ?: HIGHEST
+    }
+}
+
 /** No global server has been chosen yet; the launch route supplies the initial server. */
 const val DEFAULT_PREFERRED_PROVIDER = "auto"
 
@@ -78,6 +102,9 @@ object SettingsStore {
     private val _menuLanguage = MutableStateFlow(MenuLanguage.SYSTEM)
     val menuLanguage = _menuLanguage.asStateFlow()
 
+    private val _defaultQuality = MutableStateFlow(DefaultQuality.HIGHEST)
+    val defaultQuality = _defaultQuality.asStateFlow()
+
     private val _preferredProvider = MutableStateFlow(DEFAULT_PREFERRED_PROVIDER)
     val preferredProvider = _preferredProvider.asStateFlow()
     private val loaded = MutableStateFlow(false)
@@ -120,6 +147,11 @@ object SettingsStore {
     fun setCaptionTextColor(value: CaptionTextColor) = editCaptionStyle { it.copy(textColor = value) }
     fun setCaptionEdgeStyle(value: CaptionEdgeStyle) = editCaptionStyle { it.copy(edgeStyle = value) }
     fun resetCaptionStyle() = editCaptionStyle { CaptionStyle() }
+
+    fun setDefaultQuality(value: DefaultQuality) {
+        _defaultQuality.value = value
+        scope.launch { store.edit { it[DEFAULT_QUALITY] = value.storedValue } }
+    }
 
     fun setMenuLanguage(value: MenuLanguage) {
         _menuLanguage.value = value
@@ -177,6 +209,7 @@ object SettingsStore {
         _updateCheckOnLaunch.value = prefs[UPDATE_CHECK_ON_LAUNCH] ?: true
         _captionStyle.value = readCaptionStyle(prefs)
         _menuLanguage.value = MenuLanguage.fromStored(prefs[MENU_LANGUAGE])
+        _defaultQuality.value = DefaultQuality.fromStored(prefs[DEFAULT_QUALITY])
         _preferredProvider.value =
             prefs[PREFERRED_PROVIDER]?.takeIf(String::isNotBlank) ?: DEFAULT_PREFERRED_PROVIDER
         loaded.value = true
@@ -213,6 +246,7 @@ object SettingsStore {
     private val CAPTION_TEXT_COLOR = stringPreferencesKey("caption_text_color")
     private val CAPTION_EDGE_STYLE = stringPreferencesKey("caption_edge_style")
     private val MENU_LANGUAGE = stringPreferencesKey("menu_language")
+    private val DEFAULT_QUALITY = stringPreferencesKey("default_quality")
     private val PREFERRED_PROVIDER = stringPreferencesKey("preferred_provider")
     private val MIGRATED = booleanPreferencesKey("migrated_from_shared_preferences")
 }

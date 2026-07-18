@@ -432,6 +432,29 @@ class MiruroRepository(
         return EpisodesResult(providers.map { it.copy(sub = mark(it.sub), dub = mark(it.dub)) })
     }
 
+    /**
+     * Quick partial Anivexa catalog: just the fast API-backed providers (plus [extraProviders]
+     * when the user's preferred server is a slower one), so the watch screen can start playback
+     * without waiting for every scraper. The full catalog still loads separately and replaces
+     * these entries via [mergeProviders].
+     */
+    suspend fun fastAnivexaEpisodes(anilistId: Int, extraProviders: Set<String> = emptySet()): EpisodesResult {
+        val providers = (
+            ProviderCatalog.fastAnivexaProviders +
+                extraProviders.filter { it in ProviderCatalog.anivexaProviders }
+            ).distinct()
+        val seed = runCatching { animeInfo(anilistId) }.getOrNull()
+        return cache.getOrFetch(
+            key = "episodes:v4:anivexa-fast:${providers.sorted().joinToString(",")}:$anilistId",
+            serializer = EpisodesResult.serializer(),
+            ttlMs = EPISODES_TTL,
+        ) {
+            anivexa.getEpisodes(anilistId, seed, providers).also {
+                check(!it.isEmpty) { "Fast providers returned no episodes" }
+            }
+        }.withFillerMarks(anilistId)
+    }
+
     /** Merged view of both sources — used where the full provider list is needed (watch screen). */
     suspend fun episodes(anilistId: Int): EpisodesResult = coroutineScope {
         val miruro = async {
@@ -447,8 +470,14 @@ class MiruroRepository(
         mergeProviders(miruro.await(), anivexa.await())
     }
 
-    fun mergeProviders(a: EpisodesResult, b: EpisodesResult): EpisodesResult =
-        EpisodesResult((a.providers + b.providers).sortedBy { ProviderCatalog.sortKey(it.name) })
+    /** Providers present in both lists keep [b]'s entry (the fresher, fuller catalog). */
+    fun mergeProviders(a: EpisodesResult, b: EpisodesResult): EpisodesResult {
+        val replaced = b.providerNames.toSet()
+        return EpisodesResult(
+            (a.providers.filterNot { it.name in replaced } + b.providers)
+                .sortedBy { ProviderCatalog.sortKey(it.name) },
+        )
+    }
 
     suspend fun sources(
         pipeId: String,

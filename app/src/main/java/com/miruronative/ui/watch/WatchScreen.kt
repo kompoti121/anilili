@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -30,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
@@ -65,6 +67,9 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -203,8 +208,9 @@ fun WatchScreen(
                     delay(1_500)
                     showSlowNote = true
                 }
+                val loadingStatus by vm.loadingStatus.collectAsState()
                 LoadingBox(
-                    message = if (showSlowNote) {
+                    message = loadingStatus ?: if (showSlowNote) {
                         "Finding a source for this episode.\n" +
                             "The first time you open a title we check every server, so it can take a few seconds."
                     } else {
@@ -311,6 +317,15 @@ private fun WatchContent(
                         false
                     }
                 }
+                // Screen readers consume the D-pad, so the key handler above never fires under
+                // TalkBack; this semantic action is the accessible way into the fullscreen player.
+                .semantics {
+                    contentDescription = "Video player"
+                    onClick(label = "Open fullscreen player") {
+                        onToggleFullscreen()
+                        true
+                    }
+                }
                 .focusable()
         } else {
             Modifier
@@ -351,6 +366,7 @@ private fun WatchContent(
                                 onClick = onToggleFullscreen,
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
+                                    .statusBarsPadding()
                                     .padding(4.dp)
                                     .focusHighlight(RoundedCornerShape(24.dp)),
                             ) {
@@ -587,6 +603,19 @@ private fun SourceSelectors(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Bolt,
+                                contentDescription = null,
+                                tint = FastServerColor,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Text(
+                                text = "Fast servers — these usually start quickest",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         if (pendingServers.isNotEmpty()) {
                             Text(
                                 text = "Checking more servers…",
@@ -653,15 +682,27 @@ private fun SourceSelectors(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         if (ready) {
-                                            Text(
-                                                text = ProviderCatalog.label(server) + if (preferred) " ★" else "",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = if (selected || preferred) FontWeight.Bold else FontWeight.Normal,
-                                                color = textColor,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.padding(horizontal = 4.dp)
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(horizontal = 4.dp),
+                                            ) {
+                                                if (ProviderCatalog.isFast(server)) {
+                                                    Icon(
+                                                        Icons.Default.Bolt,
+                                                        contentDescription = "Fast server",
+                                                        tint = if (selected) textColor else FastServerColor,
+                                                        modifier = Modifier.size(14.dp),
+                                                    )
+                                                }
+                                                Text(
+                                                    text = ProviderCatalog.label(server) + if (preferred) " ★" else "",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = if (selected || preferred) FontWeight.Bold else FontWeight.Normal,
+                                                    color = textColor,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
                                         } else {
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
@@ -861,11 +902,16 @@ private fun EmbedEpisodeNavigationEffect(
     }
 }
 
+/** Amber bolt tint for the fast-server badge; readable on both selected and idle cells. */
+private val FastServerColor = Color(0xFFFFB300)
+
 @Composable
 private fun BackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
     IconButton(
         onClick = onBack,
-        modifier = modifier.padding(4.dp).focusHighlight(RoundedCornerShape(24.dp)),
+        // The app draws edge-to-edge, so keep the button below the clock/battery area whenever
+        // the status bar is visible (the inset is zero in fullscreen, where the bars are hidden).
+        modifier = modifier.statusBarsPadding().padding(4.dp).focusHighlight(RoundedCornerShape(24.dp)),
     ) {
         Icon(
             Icons.AutoMirrored.Filled.ArrowBack,

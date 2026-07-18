@@ -21,11 +21,28 @@ object ProviderCatalog {
         "senshi", "anibd", "anikoto", "allanime", "animekai", "reanime", "anizone", "animegg", "anineko", "2dhive",
     )
 
+    // The consistently quick Anivexa lookups (API-backed, not full-page scrapers). Raced as an
+    // early partial catalog when the Miruro pipe is down or slow, so playback never waits for
+    // the 15-second stragglers; the remaining providers still merge in behind.
+    val fastAnivexaProviders = listOf("senshi", "anibd", "anikoto")
+
+    // Providers that consistently resolve and start quickly: the Miruro pipe's native HLS set
+    // (one pipe call away) and the API-backed Anivexa lookups. Embeds and full-page scrapers
+    // are excluded. Drives the ⚡ badge and the speed-first sort below.
+    val fastProviders: Set<String> =
+        (miruroOrder - miruroEmbed).toSet() + fastAnivexaProviders
+
+    fun isFast(provider: String): Boolean = provider in fastProviders
+
     // Default row order: bonk (Miruro pipe) then anibd (Anivexa) lead as the two default
     // sources — independent backends, both fast and reliable — with senshi right behind.
-    // A user's saved favourite provider always overrides this order.
+    // After the leaders, fast providers sort before embeds and slow scrapers so the quick
+    // options are always at the top of the server list. A user's saved favourite provider
+    // always overrides this order.
     private val leaders = listOf("bonk", "anibd", "senshi")
-    private val order = leaders + (miruroOrder + anivexaProviders).filterNot { it in leaders }
+    private val order = leaders +
+        (miruroOrder + anivexaProviders).filterNot { it in leaders }
+            .sortedByDescending { it in fastProviders }
 
     fun sourceOf(provider: String): Source =
         if (provider in anivexaProviders) Source.ANIVEXA else Source.MIRURO

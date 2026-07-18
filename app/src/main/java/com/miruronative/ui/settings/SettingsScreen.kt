@@ -11,6 +11,8 @@ import androidx.compose.ui.res.painterResource
 import com.miruronative.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -59,6 +61,7 @@ import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.library.MalExportFile
 import com.miruronative.data.reminder.AutomaticReleaseManager
 import com.miruronative.data.reminder.ReleaseSyncScheduler
+import com.miruronative.data.settings.DefaultQuality
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.data.settings.MenuLanguage
 import com.miruronative.data.update.UpdateManager
@@ -90,6 +93,7 @@ fun SettingsScreen(
     val autoSkip by SettingsStore.autoSkipIntroOutro.collectAsState()
     val autoSync by SettingsStore.autoSyncAniList.collectAsState()
     val preferDub by SettingsStore.preferDub.collectAsState()
+    val defaultQuality by SettingsStore.defaultQuality.collectAsState()
     val releaseNotifications by SettingsStore.releaseNotifications.collectAsState()
     val hideAdultContent by SettingsStore.hideAdultContent.collectAsState()
     val subtitlesWithDub by SettingsStore.subtitlesWithDub.collectAsState()
@@ -231,6 +235,12 @@ fun SettingsScreen(
             item { SettingsSectionTitle("Playback") }
             item { SettingSwitch("Autoplay next episode", "Continue automatically", autoplay, SettingsStore::setAutoplay) }
             item { SettingSwitch("Auto-skip intro and outro", "Use provider skip times when available", autoSkip, SettingsStore::setAutoSkipIntroOutro) }
+            item {
+                DefaultQualitySetting(
+                    selected = defaultQuality,
+                    onSelect = SettingsStore::setDefaultQuality,
+                )
+            }
             item { SettingSwitch("Prefer dubbed audio", "Use dub first when available", preferDub, SettingsStore::setPreferDub) }
             item {
                 SettingSwitch(
@@ -428,6 +438,41 @@ fun SettingsScreen(
                             context.startActivity(intent)
                         }
                     },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DefaultQualitySetting(
+    selected: DefaultQuality,
+    onSelect: (DefaultQuality) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Text(
+            "Default quality",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+        )
+        Text(
+            "Picked automatically when an episode starts in the built-in player",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        // Five chips outgrow a single row on narrow portrait widths, so let them wrap.
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 6.dp),
+        ) {
+            DefaultQuality.entries.forEach { quality ->
+                FilterChip(
+                    selected = selected == quality,
+                    onClick = { onSelect(quality) },
+                    label = { Text(quality.label) },
+                    modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
                 )
             }
         }
