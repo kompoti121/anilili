@@ -97,6 +97,7 @@ import coil.compose.AsyncImage
 import com.miruronative.data.ProviderCatalog
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.library.WatchlistEntry
+import com.miruronative.data.model.Category
 import com.miruronative.data.model.EpisodeItem
 import com.miruronative.data.model.StreamItem
 import com.miruronative.diagnostics.DiagnosticsLog
@@ -136,9 +137,12 @@ fun WatchScreen(
     }
     val activity = remember(context) { context.findActivity() }
     val currentOnBack by rememberUpdatedState(onBack)
+    var embeddedPlaybackStopper by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val currentEmbeddedPlaybackStopper by rememberUpdatedState(embeddedPlaybackStopper)
     val pauseAndBack = remember {
         {
-            PlaybackService.pauseActivePlayback()
+            currentEmbeddedPlaybackStopper?.invoke()
+            PlaybackService.stopActivePlayback()
             currentOnBack()
         }
     }
@@ -202,10 +206,13 @@ fun WatchScreen(
     BackHandler(enabled = fullscreen) { fullscreen = false }
     BackHandler(enabled = !fullscreen) { pauseAndBack() }
 
-    // Pause however the screen is left (back, Anime page, notification nav) — not just the
+    // Stop however the screen is left (back, Anime page, notification nav) — not just the
     // Back gesture. PiP keeps this screen composed, so picture-in-picture is unaffected.
     DisposableEffect(Unit) {
-        onDispose { PlaybackService.pauseActivePlayback() }
+        onDispose {
+            currentEmbeddedPlaybackStopper?.invoke()
+            PlaybackService.stopActivePlayback()
+        }
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -216,6 +223,7 @@ fun WatchScreen(
                 modifier = Modifier.fillMaxSize(),
                 onFullscreenChanged = { fullscreen = it },
                 onProgress = vm::onProgress,
+                onPlaybackStopperChanged = { embeddedPlaybackStopper = it },
             )
             BackButton(pauseAndBack, Modifier.align(Alignment.TopStart))
             return@Box
@@ -283,6 +291,7 @@ fun WatchScreen(
                     onFullscreenChanged = { fullscreen = it },
                     onProgress = vm::onProgress,
                     onPlaybackError = vm::onPlaybackError,
+                    onPlaybackStopperChanged = { embeddedPlaybackStopper = it },
                 )
             }
         }
@@ -306,6 +315,7 @@ private fun WatchContent(
     onFullscreenChanged: (Boolean) -> Unit,
     onProgress: (Long, Long) -> Unit,
     onPlaybackError: (String, String, Long) -> Unit,
+    onPlaybackStopperChanged: (((() -> Unit)?) -> Unit)? = null,
 ) {
     val device = LocalAppDeviceProfile.current
     val configuration = LocalConfiguration.current
@@ -413,6 +423,7 @@ private fun WatchContent(
                                 onFullscreenChanged = onFullscreenChanged,
                                 onProgress = onProgress,
                                 onPlaybackError = onPlaybackError.takeIf { data.provider == "allanime" },
+                                onPlaybackStopperChanged = onPlaybackStopperChanged,
                             )
                             // Embed players often use CSS "web fullscreen" that never reaches the
                             // WebView fullscreen callback, so the app provides its own toggle.
@@ -899,6 +910,11 @@ private fun SourceSelectors(
 ) {
     val device = LocalAppDeviceProfile.current
     val servers = remember(data.sourceOptions) { data.sourceOptions.map { it.provider }.distinct() }
+    val categoriesByServer = remember(data.sourceOptions) {
+        data.sourceOptions
+            .groupBy { it.provider }
+            .mapValues { (_, options) -> options.map { it.category }.distinct() }
+    }
     val audioForServer = remember(data.sourceOptions, data.provider) {
         data.sourceOptions.filter { it.provider == data.provider }.map { it.category }.distinct()
     }
@@ -1099,7 +1115,7 @@ private fun SourceSelectors(
                                                     Modifier
                                                 },
                                             )
-                                            .height(44.dp)
+                                            .height(58.dp)
                                             .onPreviewKeyEvent { event ->
                                                 val keyCode = event.nativeKeyEvent.keyCode
                                                 val activate = keyCode == AndroidKeyEvent.KEYCODE_DPAD_CENTER ||
@@ -1122,28 +1138,36 @@ private fun SourceSelectors(
                                                 RoundedCornerShape(8.dp)
                                             )
                                             .clickable(onClick = selectServer),
-                                        contentAlignment = Alignment.Center
+                                        contentAlignment = Alignment.Center,
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(3.dp),
                                             modifier = Modifier.padding(horizontal = 4.dp),
                                         ) {
-                                            if (ProviderCatalog.isFast(server)) {
-                                                Icon(
-                                                    Icons.Default.Bolt,
-                                                    contentDescription = "Fast server",
-                                                    tint = if (selected) textColor else FastServerColor,
-                                                    modifier = Modifier.size(14.dp),
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                if (ProviderCatalog.isFast(server)) {
+                                                    Icon(
+                                                        Icons.Default.Bolt,
+                                                        contentDescription = "Fast server",
+                                                        tint = if (selected) textColor else FastServerColor,
+                                                        modifier = Modifier.size(14.dp),
+                                                    )
+                                                }
+                                                Text(
+                                                    text = ProviderCatalog.label(server) + if (preferred) " ★" else "",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = if (selected || preferred) FontWeight.Bold else FontWeight.Normal,
+                                                    color = textColor,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
                                                 )
                                             }
-                                            Text(
-                                                text = ProviderCatalog.label(server) + if (preferred) " ★" else "",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = if (selected || preferred) FontWeight.Bold else FontWeight.Normal,
-                                                color = textColor,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                                categoriesByServer[server].orEmpty().forEach { category ->
+                                                    SourceCategoryBadge(category = category, selected = selected)
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1177,6 +1201,11 @@ private fun MobileServerPickerContent(
     onSelect: (String) -> Unit,
     onClose: () -> Unit,
 ) {
+    val categoriesByServer = remember(data.sourceOptions) {
+        data.sourceOptions
+            .groupBy { it.provider }
+            .mapValues { (_, options) -> options.map { it.category }.distinct() }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1222,65 +1251,77 @@ private fun MobileServerPickerContent(
                 .fillMaxWidth()
                 .heightIn(max = 440.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            servers.forEach { server ->
-                val selected = server == data.provider
-                val preferred = server == data.preferredProvider
+            val columns = 2
+            servers.chunked(columns).forEach { rowServers ->
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(
-                            when {
-                                selected -> MaterialTheme.colorScheme.primary
-                                else -> MaterialTheme.colorScheme.surfaceVariant
-                            },
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = if (selected || preferred) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.outline,
-                            shape = RoundedCornerShape(11.dp),
-                        )
-                        .clickable { onSelect(server) }
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (ProviderCatalog.isFast(server)) {
-                        Icon(
-                            Icons.Default.Bolt,
-                            contentDescription = "Fast server",
-                            tint = if (selected) MaterialTheme.colorScheme.onPrimary else FastServerColor,
-                            modifier = Modifier.size(17.dp),
-                        )
+                    rowServers.forEach { server ->
+                        val selected = server == data.provider
+                        val preferred = server == data.preferredProvider
+                        val textColor = if (selected) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurface
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(64.dp)
+                                .clip(RoundedCornerShape(11.dp))
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.surfaceVariant,
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (selected || preferred) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outline,
+                                    shape = RoundedCornerShape(11.dp),
+                                )
+                                .clickable { onSelect(server) }
+                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                if (ProviderCatalog.isFast(server)) {
+                                    Icon(
+                                        Icons.Default.Bolt,
+                                        contentDescription = "Fast server",
+                                        tint = if (selected) textColor else FastServerColor,
+                                        modifier = Modifier.size(15.dp),
+                                    )
+                                }
+                                Text(
+                                    text = ProviderCatalog.label(server) + if (preferred) " ★" else "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = if (selected || preferred) FontWeight.Bold else FontWeight.Normal,
+                                    color = textColor,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (selected) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(15.dp),
+                                    )
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                categoriesByServer[server].orEmpty().forEach { category ->
+                                    SourceCategoryBadge(category = category, selected = selected)
+                                }
+                            }
+                        }
                     }
-                    Text(
-                        text = ProviderCatalog.label(server),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = if (selected || preferred) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f).padding(start = 8.dp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (preferred) {
-                        Text(
-                            text = "Preferred",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (selected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f)
-                            else MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    if (selected) {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = "Selected",
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.padding(start = 8.dp).size(18.dp),
-                        )
+                    repeat(columns - rowServers.size) {
+                        Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -1289,6 +1330,25 @@ private fun MobileServerPickerContent(
         TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) {
             Text("Close")
         }
+    }
+}
+
+@Composable
+private fun SourceCategoryBadge(category: Category, selected: Boolean) {
+    val color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(color.copy(alpha = 0.16f))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    ) {
+        Text(
+            text = category.name,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = color,
+            maxLines = 1,
+        )
     }
 }
 

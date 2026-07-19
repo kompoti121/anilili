@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.animation.core.animateFloatAsState
@@ -279,8 +280,8 @@ private enum class Tab(
 /** Search is launched from Home's top action on phones; TV keeps it in the navigation rail. */
 private val phoneTabs = Tab.entries.filterNot { it == Tab.SEARCH }
 
-/** Material3 NavigationBar container height; the content area reserves exactly this plus insets. */
-private val PhoneNavigationBarHeight = 80.dp
+/** Compact phone navigation content height; the system navigation inset is added separately. */
+private val PhoneNavigationBarHeight = 64.dp
 
 @Composable
 private fun MiruroRoot(
@@ -375,13 +376,11 @@ private fun MiruroRoot(
         UpdatePromptHost()
         Box(Modifier.fillMaxSize().nestedScroll(chromeScrollConnection)) {
             val hasPhoneBottomBar = showBottomBar && !deviceProfile.useNavigationRail
-            // The bar's reserved space never changes and the bar slides out via graphicsLayer, so
-            // hiding it costs zero relayout — this is what makes the hide/show seamless. Putting
-            // it back in Scaffold's bottomBar slot behind AnimatedVisibility would animate the
-            // slot height and re-lay-out the whole screen every frame (and paint a background
-            // band behind the departing bar).
+            // The bar overlays the content and slides out via graphicsLayer, so it neither
+            // re-lays out the screen during animation nor leaves a reserved background band.
+            // Tab content also draws behind the system navigation area for a fully edge-to-edge
+            // viewport when the bar is hidden; non-tab screens retain Scaffold's safe inset.
             val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-            val reservedBottom = if (hasPhoneBottomBar) PhoneNavigationBarHeight + navBarInset else 0.dp
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
             ) { innerPadding ->
@@ -389,7 +388,7 @@ private fun MiruroRoot(
                     Modifier
                         .fillMaxSize()
                         .padding(
-                            bottom = maxOf(reservedBottom, innerPadding.calculateBottomPadding()),
+                            bottom = if (hasPhoneBottomBar) 0.dp else innerPadding.calculateBottomPadding(),
                         ),
                 ) {
                     if (showBottomBar && deviceProfile.useNavigationRail) {
@@ -417,6 +416,7 @@ private fun MiruroRoot(
                     containerColor = MaterialTheme.colorScheme.surface,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
+                        .height(PhoneNavigationBarHeight + navBarInset)
                         .graphicsLayer { translationY = size.height * chromeShift },
                 ) {
                     phoneTabs.forEach { tab ->

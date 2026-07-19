@@ -117,6 +117,7 @@ fun EmbedWebView(
     onFullscreenChanged: (Boolean) -> Unit = {},
     onProgress: ((positionMs: Long, durationMs: Long) -> Unit)? = null,
     onPlaybackError: ((message: String, streamUrl: String, positionMs: Long) -> Unit)? = null,
+    onPlaybackStopperChanged: (((() -> Unit)?) -> Unit)? = null,
 ) {
     val device = LocalAppDeviceProfile.current
     val context = LocalContext.current
@@ -142,6 +143,7 @@ fun EmbedWebView(
     var loadError by remember { mutableStateOf<String?>(null) }
     var webView by remember { mutableStateOf<WebView?>(null) }
     var finishedUrl by remember(activeUrl) { mutableStateOf<String?>(null) }
+    val currentOnPlaybackStopperChanged by rememberUpdatedState(onPlaybackStopperChanged)
     val currentOnFullscreenChanged by rememberUpdatedState(onFullscreenChanged)
     val currentOnProgress by rememberUpdatedState(onProgress)
     val currentOnPreviousEpisode by rememberUpdatedState(onPreviousEpisode)
@@ -177,6 +179,12 @@ fun EmbedWebView(
     val outroEndMs = skip?.outroEnd?.times(1000)?.toLong()
     var introAutoSkipped by remember(activeUrl, introStartMs, introEndMs) { mutableStateOf(false) }
     var outroAutoHandled by remember(activeUrl, outroStartMs, outroEndMs) { mutableStateOf(false) }
+
+    DisposableEffect(webView) {
+        val web = webView
+        currentOnPlaybackStopperChanged?.invoke(web?.let { { stopWebPlayback(it) } })
+        onDispose { currentOnPlaybackStopperChanged?.invoke(null) }
+    }
 
     // Our own touch controls take over whenever the injected JS can reach the <video>; a
     // cross-origin embed is untouchable, so the provider's UI stays in charge there.
@@ -650,12 +658,8 @@ fun EmbedWebView(
                 val web = view as? WebView ?: return@AndroidView
                 if (webView === web) webView = null
                 DiagnosticsLog.event("EmbedWebView release url=${web.url ?: "none"} size=${web.width}x${web.height}")
-                runCatching { web.evaluateJavascript(PAUSE_VIDEO_JS, null) }
-                web.onPause()
-                web.pauseTimers()
-                web.stopLoading()
+                stopWebPlayback(web)
                 web.removeJavascriptInterface("AniliProgress")
-                web.loadUrl("about:blank")
                 web.clearHistory()
                 web.removeAllViews()
                 web.webChromeClient = null
@@ -1220,6 +1224,15 @@ private fun SEEK_VIDEO_JS(targetSec: Double): String = """
       }
     })();
 """.trimIndent()
+
+private fun stopWebPlayback(webView: WebView) {
+    DiagnosticsLog.event("EmbedWebView stop playback url=${webView.url ?: "none"}")
+    runCatching { webView.evaluateJavascript(PAUSE_VIDEO_JS, null) }
+    webView.onPause()
+    webView.pauseTimers()
+    webView.stopLoading()
+    webView.loadUrl("about:blank")
+}
 
 private val PAUSE_VIDEO_JS = """
     (function() {
