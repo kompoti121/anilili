@@ -19,15 +19,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
@@ -53,11 +52,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -277,6 +279,9 @@ private enum class Tab(
 /** Search is launched from Home's top action on phones; TV keeps it in the navigation rail. */
 private val phoneTabs = Tab.entries.filterNot { it == Tab.SEARCH }
 
+/** Material3 NavigationBar container height; the content area reserves exactly this plus insets. */
+private val PhoneNavigationBarHeight = 80.dp
+
 @Composable
 private fun MiruroRoot(
     inPictureInPicture: Boolean,
@@ -293,14 +298,28 @@ private fun MiruroRoot(
     var chromeVisible by remember { mutableStateOf(true) }
     val chromeScope = rememberCoroutineScope()
     var restoreChromeJob by remember { mutableStateOf<Job?>(null) }
-    val chromeScrollConnection = remember(deviceProfile.isTv) {
+    // Direction-based like YouTube/Chrome: hide once a downward scroll passes a small threshold,
+    // show the moment the user scrolls up (or goes idle). The threshold stops micro-scrolls from
+    // flickering the chrome, and hide/show firing once per direction change (instead of on every
+    // scroll frame) is what keeps the animation smooth.
+    val chromeHideThresholdPx = with(LocalDensity.current) { 24.dp.toPx() }
+    val chromeScrollConnection = remember(deviceProfile.isTv, chromeHideThresholdPx) {
         object : NestedScrollConnection {
+            private var accumulated = 0f
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (!deviceProfile.isTv && available.y != 0f) {
+                if (deviceProfile.isTv || available.y == 0f) return Offset.Zero
+                if ((accumulated < 0f) != (available.y < 0f)) accumulated = 0f
+                accumulated += available.y
+                if (accumulated < -chromeHideThresholdPx && chromeVisible) {
                     chromeVisible = false
+                } else if (accumulated > chromeHideThresholdPx && !chromeVisible) {
+                    chromeVisible = true
+                    restoreChromeJob?.cancel()
+                }
+                if (!chromeVisible) {
                     restoreChromeJob?.cancel()
                     restoreChromeJob = chromeScope.launch {
-                        delay(360)
+                        delay(700)
                         chromeVisible = true
                     }
                 }
@@ -355,37 +374,23 @@ private fun MiruroRoot(
         NotificationPermissionEffect()
         UpdatePromptHost()
         Box(Modifier.fillMaxSize().nestedScroll(chromeScrollConnection)) {
+            val hasPhoneBottomBar = showBottomBar && !deviceProfile.useNavigationRail
+            // The bar's reserved space never changes and the bar slides out via graphicsLayer, so
+            // hiding it costs zero relayout — this is what makes the hide/show seamless. Putting
+            // it back in Scaffold's bottomBar slot behind AnimatedVisibility would animate the
+            // slot height and re-lay-out the whole screen every frame (and paint a background
+            // band behind the departing bar).
+            val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            val reservedBottom = if (hasPhoneBottomBar) PhoneNavigationBarHeight + navBarInset else 0.dp
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
-                bottomBar = {
-                    AnimatedVisibility(
-                        visible = showBottomBar && !deviceProfile.useNavigationRail && chromeVisible,
-                        enter = slideInVertically(tween(180)) { it } + fadeIn(tween(140)),
-                        exit = slideOutVertically(tween(150)) { it } + fadeOut(tween(110)),
-                    ) {
-                        NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                            phoneTabs.forEach { tab ->
-                                val label = tab.label(menuLanguage)
-                                NavigationBarItem(
-                                    selected = currentRoute == tab.route,
-                                    onClick = { nav.navigateTab(tab.route) },
-                                    icon = { Icon(tab.icon, contentDescription = label) },
-                                    label = { Text(label) },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                                        indicatorColor = MaterialTheme.colorScheme.primary,
-                                        selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    ),
-                                )
-                            }
-                        }
-                    }
-                },
             ) { innerPadding ->
                 Row(
                     Modifier
                         .fillMaxSize()
-                        .padding(bottom = innerPadding.calculateBottomPadding()),
+                        .padding(
+                            bottom = maxOf(reservedBottom, innerPadding.calculateBottomPadding()),
+                        ),
                 ) {
                     if (showBottomBar && deviceProfile.useNavigationRail) {
                         AppNavigationRail(
@@ -400,6 +405,34 @@ private fun MiruroRoot(
                         inPictureInPicture = inPictureInPicture,
                         modifier = Modifier.weight(1f),
                     )
+                }
+            }
+            if (hasPhoneBottomBar) {
+                val chromeShift by animateFloatAsState(
+                    targetValue = if (chromeVisible) 0f else 1f,
+                    animationSpec = tween(220),
+                    label = "chromeShift",
+                )
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .graphicsLayer { translationY = size.height * chromeShift },
+                ) {
+                    phoneTabs.forEach { tab ->
+                        val label = tab.label(menuLanguage)
+                        NavigationBarItem(
+                            selected = currentRoute == tab.route,
+                            onClick = { nav.navigateTab(tab.route) },
+                            icon = { Icon(tab.icon, contentDescription = label) },
+                            label = { Text(label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.onPrimary,
+                                indicatorColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    }
                 }
             }
             // Hidden resolver WebViews are not needed for Home. On slow Android TV boxes,
