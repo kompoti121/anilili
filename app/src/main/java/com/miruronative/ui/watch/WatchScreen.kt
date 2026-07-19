@@ -45,8 +45,6 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -481,8 +479,6 @@ private fun WatchContent(
                 saved = saved,
                 onToggleSaved = onToggleSaved,
                 focusRequester = sourceFocus,
-                onPrev = onPrev,
-                onNext = onNext,
                 onChangeSource = onChangeSource,
                 onChangeCategory = onChangeCategory,
                 onSelectEpisode = onSelectEpisode,
@@ -777,8 +773,6 @@ private fun MobileWatchDetails(
     saved: Boolean,
     onToggleSaved: () -> Unit,
     focusRequester: FocusRequester,
-    onPrev: () -> Unit,
-    onNext: () -> Unit,
     onChangeSource: (String, String) -> Unit,
     onChangeCategory: (String) -> Unit,
     onSelectEpisode: (Int) -> Unit,
@@ -794,23 +788,8 @@ private fun MobileWatchDetails(
                     onToggleSaved = onToggleSaved,
                     modifier = Modifier.padding(start = pad, end = pad, top = 16.dp, bottom = 4.dp),
                 )
-                Row(
-                    modifier = Modifier.padding(start = pad, end = pad, top = 8.dp, bottom = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    WatchNavPill(
-                        label = "Previous",
-                        icon = Icons.Default.SkipPrevious,
-                        enabled = data.hasPrev,
-                        onClick = onPrev,
-                    )
-                    WatchNavPill(
-                        label = "Next",
-                        icon = Icons.Default.SkipNext,
-                        enabled = data.hasNext,
-                        onClick = onNext,
-                    )
-                }
+                // Previous/Next pills removed: the player transport and the episode list below
+                // already cover episode navigation.
             }
             SourceSelectors(
                 data = data,
@@ -847,38 +826,6 @@ private fun MobileWatchDetails(
             )
         }
         item { Spacer(Modifier.height(28.dp)) }
-    }
-}
-
-@Composable
-private fun WatchNavPill(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(17.dp),
-            tint = if (enabled) MaterialTheme.colorScheme.onSurface
-            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-        )
-        Text(
-            label,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (enabled) MaterialTheme.colorScheme.onSurface
-            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-            modifier = Modifier.padding(start = 5.dp),
-        )
     }
 }
 
