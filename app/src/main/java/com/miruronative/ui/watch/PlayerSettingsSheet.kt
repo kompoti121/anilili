@@ -1,7 +1,9 @@
 package com.miruronative.ui.watch
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,19 +11,26 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
@@ -31,22 +40,32 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import com.miruronative.ui.adaptive.LocalAppDeviceProfile
+import com.miruronative.ui.adaptive.focusHighlight
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 internal enum class PlayerContentScale(val label: String) {
     FIT("Fit"),
@@ -86,6 +105,30 @@ internal fun PlayerSettingsSheet(
     onAutoSkipChange: (Boolean) -> Unit = {},
     onEnterPip: (() -> Unit)? = null,
 ) {
+    val sections: @Composable () -> Unit = {
+        SheetSections(
+            autoplay = autoplay,
+            onAutoplayChange = onAutoplayChange,
+            speed = speed,
+            onSpeedChange = onSpeedChange,
+            qualityOptions = qualityOptions,
+            subtitleOptions = subtitleOptions,
+            audioOptions = audioOptions,
+            contentScale = contentScale,
+            onContentScaleChange = onContentScaleChange,
+            onCaptionAppearance = onCaptionAppearance,
+            autoSkip = autoSkip,
+            onAutoSkipChange = onAutoSkipChange,
+            onEnterPip = onEnterPip,
+        )
+    }
+    // A ModalBottomSheet opens a second window, which the TV D-pad and TalkBack focus never
+    // reliably enter — the remote keeps driving the player underneath. TV gets the same
+    // sections as an in-window side panel instead, where standard Compose focus applies.
+    if (LocalAppDeviceProfile.current.isTv) {
+        TvSettingsPanel(onDismiss, sections)
+        return
+    }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -106,56 +149,134 @@ internal fun PlayerSettingsSheet(
                 style = MaterialTheme.typography.titleLarge,
             )
             Spacer(Modifier.height(12.dp))
+            sections()
+        }
+    }
+}
 
-            SectionLabel("Volume")
-            MediaVolumeSlider(modifier = Modifier.fillMaxWidth(), showPercentLabel = true)
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SheetSections(
+    autoplay: Boolean,
+    onAutoplayChange: (Boolean) -> Unit,
+    speed: Float?,
+    onSpeedChange: (Float) -> Unit,
+    qualityOptions: List<PlayerQualityOption>,
+    subtitleOptions: List<PlayerQualityOption>,
+    audioOptions: List<PlayerQualityOption>,
+    contentScale: PlayerContentScale?,
+    onContentScaleChange: (PlayerContentScale) -> Unit,
+    onCaptionAppearance: (() -> Unit)?,
+    autoSkip: Boolean?,
+    onAutoSkipChange: (Boolean) -> Unit,
+    onEnterPip: (() -> Unit)?,
+) {
+    SectionLabel("Volume")
+    MediaVolumeSlider(modifier = Modifier.fillMaxWidth(), showPercentLabel = true)
 
-            speed?.let { current ->
-                SectionLabel("Playback Speed")
-                SpeedSlider(current, onSpeedChange)
+    speed?.let { current ->
+        SectionLabel("Playback Speed")
+        SpeedSlider(current, onSpeedChange)
+    }
+
+    if (qualityOptions.isNotEmpty()) {
+        SectionLabel("Quality")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            qualityOptions.forEach { option ->
+                ChoiceChip(option.label, option.selected, option.onSelect)
             }
+        }
+    }
 
-            if (qualityOptions.isNotEmpty()) {
-                SectionLabel("Quality")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    qualityOptions.forEach { option ->
-                        ChoiceChip(option.label, option.selected, option.onSelect)
-                    }
+    if (audioOptions.size > 1) {
+        SectionLabel("Audio")
+        audioOptions.forEach { option ->
+            TrackRow(option.label, option.selected, option.onSelect)
+        }
+    }
+
+    if (subtitleOptions.isNotEmpty()) {
+        SectionLabel("Subtitles")
+        subtitleOptions.forEach { option ->
+            TrackRow(option.label, option.selected, option.onSelect)
+        }
+    }
+
+    contentScale?.let { current ->
+        SectionLabel("Content Scale")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PlayerContentScale.entries.forEach { scale ->
+                ChoiceChip(scale.label, scale == current) { onContentScaleChange(scale) }
+            }
+        }
+    }
+
+    onCaptionAppearance?.let { open ->
+        SectionLabel("Captions")
+        ClickableRow("Caption appearance…", open)
+    }
+
+    SectionLabel("Playback")
+    ToggleRow("Auto-play next episode", autoplay, onAutoplayChange)
+    autoSkip?.let { ToggleRow("Auto-skip intro/outro", it, onAutoSkipChange) }
+    onEnterPip?.let { ClickableRow("Picture-in-Picture", it) }
+}
+
+/**
+ * TV presentation of the player settings: an in-window right-side panel. Being in the player's
+ * own window (unlike a ModalBottomSheet) means the D-pad and TalkBack traverse it like any other
+ * Compose content. Focus is trapped inside while it is open; Back or the close button dismiss.
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+@Composable
+private fun TvSettingsPanel(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    BackHandler(onBack = onDismiss)
+    val initialFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        // Let the panel attach before grabbing focus from the player controls behind it.
+        delay(64)
+        runCatching { initialFocus.requestFocus() }
+    }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .zIndex(10f)
+            .background(Color.Black.copy(alpha = 0.55f)),
+    ) {
+        Column(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(420.dp)
+                .background(SheetColor)
+                // Keep the remote inside the panel; Back and the close button leave it.
+                .focusProperties { exit = { FocusRequester.Cancel } }
+                .focusGroup()
+                .verticalScroll(rememberScrollState())
+                .semantics { paneTitle = "Player settings" }
+                .padding(start = 22.dp, end = 22.dp, top = 16.dp, bottom = 32.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Settings",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .focusRequester(initialFocus)
+                        .focusHighlight(RoundedCornerShape(24.dp)),
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Close settings", tint = Color.White)
                 }
             }
-
-            if (audioOptions.size > 1) {
-                SectionLabel("Audio")
-                audioOptions.forEach { option ->
-                    TrackRow(option.label, option.selected, option.onSelect)
-                }
-            }
-
-            if (subtitleOptions.isNotEmpty()) {
-                SectionLabel("Subtitles")
-                subtitleOptions.forEach { option ->
-                    TrackRow(option.label, option.selected, option.onSelect)
-                }
-            }
-
-            contentScale?.let { current ->
-                SectionLabel("Content Scale")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PlayerContentScale.entries.forEach { scale ->
-                        ChoiceChip(scale.label, scale == current) { onContentScaleChange(scale) }
-                    }
-                }
-            }
-
-            onCaptionAppearance?.let { open ->
-                SectionLabel("Captions")
-                ClickableRow("Caption appearance…", open)
-            }
-
-            SectionLabel("Playback")
-            ToggleRow("Auto-play next episode", autoplay, onAutoplayChange)
-            autoSkip?.let { ToggleRow("Auto-skip intro/outro", it, onAutoSkipChange) }
-            onEnterPip?.let { ClickableRow("Picture-in-Picture", it) }
+            content()
         }
     }
 }
@@ -221,11 +342,13 @@ private fun SectionLabel(text: String) {
 private fun ChoiceChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
+            .focusHighlight(RoundedCornerShape(8.dp))
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (selected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.08f),
             )
-            .clickable(onClick = onClick)
+            // Radio semantics so TalkBack announces "selected" and reads it as a choice.
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 9.dp),
     ) {
         Text(
@@ -241,7 +364,9 @@ private fun TrackRow(label: String, selected: Boolean, onSelect: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onSelect)
+            .focusHighlight(RoundedCornerShape(8.dp))
+            // Radio semantics carry the selection state, so the check icon is decorative.
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
             .padding(vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -254,7 +379,7 @@ private fun TrackRow(label: String, selected: Boolean, onSelect: () -> Unit) {
         if (selected) {
             Icon(
                 Icons.Default.Check,
-                contentDescription = "Selected",
+                contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
             )
         }
@@ -266,7 +391,10 @@ private fun ToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
+            .focusHighlight(RoundedCornerShape(8.dp))
+            // One toggleable row (the inner Switch is display-only) so TalkBack reads
+            // "<label>, switch, on/off" as a single stop instead of two half-described ones.
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
             .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -274,7 +402,7 @@ private fun ToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean
         Text(label, color = Color.White, style = MaterialTheme.typography.bodyLarge)
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = null,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                 checkedTrackColor = MaterialTheme.colorScheme.primary,
@@ -288,7 +416,8 @@ private fun ClickableRow(label: String, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .focusHighlight(RoundedCornerShape(8.dp))
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -424,6 +424,8 @@ fun PlayerSurface(
         runCatching { tvPlayPauseFocus.requestFocus() }
     }
     val screenReaderActive = rememberScreenReaderActive()
+    var settingsExpanded by remember { mutableStateOf(false) }
+    var captionAppearanceVisible by remember { mutableStateOf(false) }
     // TalkBack users can't discover the hidden control row through a key press, so present it
     // as soon as the fullscreen player opens instead of waiting for the semantic reveal action.
     LaunchedEffect(screenReaderActive, focusPlayerOnStart, activeStream.url) {
@@ -431,7 +433,14 @@ fun PlayerSurface(
             tvControlsVisible = true
         }
     }
-    LaunchedEffect(tvControlsVisible, tvControlsInteraction, focusPlayerOnStart, screenReaderActive) {
+    LaunchedEffect(
+        tvControlsVisible,
+        tvControlsInteraction,
+        focusPlayerOnStart,
+        screenReaderActive,
+        settingsExpanded,
+        captionAppearanceVisible,
+    ) {
         if (!focusPlayerOnStart) {
             tvControlsVisible = false
             return@LaunchedEffect
@@ -440,6 +449,10 @@ fun PlayerSurface(
         // TalkBack users navigate slowly and can't reopen the controls with a key press
         // (the screen reader consumes the D-pad), so never auto-hide under a screen reader.
         if (screenReaderActive) return@LaunchedEffect
+        // While the settings panel or caption dialog is up, the row must not vanish behind it:
+        // hiding re-arms the "any key reopens controls" interceptor, which would then swallow
+        // the panel's D-pad input and yank focus back to play/pause.
+        if (settingsExpanded || captionAppearanceVisible) return@LaunchedEffect
         delay(8_000)
         tvControlsVisible = false
         runCatching { tvPlayerFocus.requestFocus() }
@@ -487,8 +500,6 @@ fun PlayerSurface(
             DiagnosticsLog.event("PlayerSurface episode navigator cleared")
         }
     }
-    var settingsExpanded by remember { mutableStateOf(false) }
-    var captionAppearanceVisible by remember { mutableStateOf(false) }
     // Phone draws its own Compose controls (Media3's controller is disabled below); TV keeps
     // TvPlayerControls. Visible on load, then auto-hidden a few seconds into playback.
     var phoneControlsVisible by remember { mutableStateOf(true) }
@@ -604,6 +615,9 @@ fun PlayerSurface(
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 if (!opensTvPlayerControls(event.key)) return@onPreviewKeyEvent false
+                // Preview handlers on this root run before the focused child sees the key, so
+                // while an overlay owns the remote its input must pass through untouched.
+                if (settingsExpanded || captionAppearanceVisible) return@onPreviewKeyEvent false
                 tvControlsInteraction++
                 if (!tvControlsVisible) {
                     DiagnosticsLog.event("PlayerSurface TV controls opened key=${event.key}")

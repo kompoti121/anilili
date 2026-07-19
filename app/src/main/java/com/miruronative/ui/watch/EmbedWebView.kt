@@ -201,7 +201,15 @@ fun EmbedWebView(
             tvControlsVisible = true
         }
     }
-    LaunchedEffect(tvControlsVisible, tvControlsInteraction, webView, focusPlayerOnStart, screenReaderActive) {
+    LaunchedEffect(
+        tvControlsVisible,
+        tvControlsInteraction,
+        webView,
+        focusPlayerOnStart,
+        screenReaderActive,
+        settingsSheetVisible,
+        captionAppearanceVisible,
+    ) {
         if (!focusPlayerOnStart) {
             tvControlsVisible = false
             return@LaunchedEffect
@@ -210,6 +218,9 @@ fun EmbedWebView(
         // TalkBack users navigate slowly and can't reopen the controls with a key press
         // (the screen reader consumes the D-pad), so never auto-hide under a screen reader.
         if (screenReaderActive) return@LaunchedEffect
+        // While the settings panel or caption dialog is up, hiding the row would hand focus
+        // back to the WebView and take the remote away from the panel.
+        if (settingsSheetVisible || captionAppearanceVisible) return@LaunchedEffect
         delay(8_000)
         tvControlsVisible = false
         webView?.requestFocus()
