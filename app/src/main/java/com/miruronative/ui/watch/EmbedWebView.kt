@@ -666,7 +666,7 @@ fun EmbedWebView(
         // Swallows every touch so the page never sees one: web players only raise their control
         // chrome on interaction, so starving them of taps keeps the provider UI hidden and lets
         // our overlay be the only controls. Also neuters tap-hijack ads, which need a real click.
-        // A vertical drag on the left half scrubs brightness, on the right half volume.
+        // A vertical drag down the left edge scrubs brightness, down the right edge volume.
         if (touchControlsActive) PlayerGestureControls(
             onTap = {
                 touchControlsVisible = !touchControlsVisible

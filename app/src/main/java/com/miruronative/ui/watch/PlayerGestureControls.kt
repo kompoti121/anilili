@@ -69,10 +69,20 @@ private sealed interface GestureLevel {
     data class Volume(override val fraction: Float) : GestureLevel
 }
 
+private enum class GestureZone { Brightness, Volume }
+
+// Vertical drags are only picked up inside these edge strips, so a swipe across the middle of the
+// picture leaves brightness and volume alone. Sizing them by share of the width keeps them within
+// thumb reach on a phone held in portrait; the clamp stops them swallowing a landscape screen.
+private const val GESTURE_EDGE_FRACTION = 0.28f
+private val GESTURE_EDGE_MIN = 64.dp
+private val GESTURE_EDGE_MAX = 160.dp
+
 /**
- * Touch-gesture overlay shared by the native and embed players. A vertical drag on the left half
- * of the screen scrubs brightness (the Activity window's `screenBrightness`); on the right half it
- * scrubs volume (the media audio stream, which both ExoPlayer and the WebView route through). A
+ * Touch-gesture overlay shared by the native and embed players. A vertical drag down the left edge
+ * of the screen scrubs brightness (the Activity window's `screenBrightness`); down the right edge it
+ * scrubs volume (the media audio stream, which both ExoPlayer and the WebView route through). The
+ * middle of the picture is deliberately inert to either, so neither is caught by accident. A
  * transient slider indicator shows the level while dragging.
  *
  * Taps and double-taps are handled here too so a single pointer handler owns the surface: the drag
@@ -111,11 +121,17 @@ internal fun PlayerGestureControls(
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         down.consume()
-                        val leftHalf = down.position.x < size.width / 2f
-                        var value = if (leftHalf) {
-                            readBrightness(activity)
-                        } else {
-                            readVolume(audioManager)
+                        val edge = (size.width * GESTURE_EDGE_FRACTION)
+                            .coerceIn(GESTURE_EDGE_MIN.toPx(), GESTURE_EDGE_MAX.toPx())
+                        val zone = when {
+                            down.position.x <= edge -> GestureZone.Brightness
+                            down.position.x >= size.width - edge -> GestureZone.Volume
+                            else -> null
+                        }
+                        var value = when (zone) {
+                            GestureZone.Brightness -> readBrightness(activity)
+                            GestureZone.Volume -> readVolume(audioManager)
+                            null -> 0f
                         }
                         var dragging = false
                         var holding = false
@@ -154,16 +170,23 @@ internal fun PlayerGestureControls(
                                 if (abs(dy) > slop && abs(dy) > abs(dx)) dragging = true
                             }
                             if (dragging) {
-                                val delta = -change.positionChange().y / size.height.toFloat()
-                                value = (value + delta).coerceIn(0f, 1f)
-                                if (leftHalf) {
-                                    applyBrightness(activity, value)
-                                    level = GestureLevel.Brightness(value)
-                                } else {
-                                    applyVolume(audioManager, value)
-                                    level = GestureLevel.Volume(value)
+                                // A drag started in the middle still counts as a drag — it just
+                                // moves nothing — so letting go of one never lands as a tap.
+                                if (zone != null) {
+                                    val delta = -change.positionChange().y / size.height.toFloat()
+                                    value = (value + delta).coerceIn(0f, 1f)
+                                    when (zone) {
+                                        GestureZone.Brightness -> {
+                                            applyBrightness(activity, value)
+                                            level = GestureLevel.Brightness(value)
+                                        }
+                                        GestureZone.Volume -> {
+                                            applyVolume(audioManager, value)
+                                            level = GestureLevel.Volume(value)
+                                        }
+                                    }
+                                    levelTick++
                                 }
-                                levelTick++
                                 change.consume()
                             }
                             if (holding) change.consume()
