@@ -72,6 +72,8 @@ import com.miruronative.ui.components.ErrorBox
 import com.miruronative.ui.components.LoadingBox
 import com.miruronative.ui.components.PullRefreshContainer
 import com.miruronative.ui.components.ScrollAwareTopBar
+import com.miruronative.ui.components.WatchProgressBar
+import com.miruronative.ui.components.episodeWatchFraction
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -137,6 +139,7 @@ fun DetailScreen(
                         data = s.data,
                         saved = saved,
                         resume = history.firstOrNull { it.anilistId == animeId },
+                        history = history,
                         onToggleSaved = {
                             LibraryStore.toggleWatchlist(
                                 WatchlistEntry(
@@ -165,6 +168,7 @@ private fun DetailContent(
     data: DetailData,
     saved: Boolean,
     resume: HistoryEntry?,
+    history: List<HistoryEntry> = emptyList(),
     onToggleSaved: () -> Unit,
     onPlay: (Int, String, String, String) -> Unit,
     onAnimeClick: (Int) -> Unit,
@@ -203,6 +207,14 @@ private fun DetailContent(
                 onWatch = playCurrent,
             )
         }
+        resume?.let { entry ->
+            item {
+                SeriesWatchProgress(
+                    resume = entry,
+                    totalEpisodes = maxOf(episodes.size, info.episodes ?: 0),
+                )
+            }
+        }
         stickyHeader {
             DetailTabs(selected = selectedTab, onSelect = { selectedTab = it })
         }
@@ -231,6 +243,7 @@ private fun DetailContent(
                 }
                 val seasonCover = seasons.firstOrNull { it.id == data.selectedSeasonId }
                     ?.let { it.bannerImage ?: it.coverImage.best }
+                val seasonResume = history.firstOrNull { it.anilistId == data.selectedSeasonId }
                 when {
                     episodes.isNotEmpty() -> items(
                         items = episodes,
@@ -239,6 +252,7 @@ private fun DetailContent(
                         DetailEpisodeRow(
                             episode = episode,
                             fallbackImage = seasonCover ?: info.bannerImage ?: info.coverImage.best,
+                            watchedFraction = episodeWatchFraction(seasonResume, episode.number),
                             onClick = {
                                 onPlay(
                                     data.selectedSeasonId,
@@ -387,6 +401,37 @@ private fun DetailActions(
                 maxLines = 1,
             )
         }
+    }
+}
+
+/** Series-level progress like list apps show: how far through the whole anime the user is. */
+@Composable
+private fun SeriesWatchProgress(resume: HistoryEntry, totalEpisodes: Int) {
+    if (totalEpisodes <= 0) return
+    val watched = ((resume.episodeNumber - 1).coerceAtLeast(0.0) + resume.progressFraction).toFloat()
+    val fraction = (watched / totalEpisodes).coerceIn(0f, 1f)
+    val pad = LocalAppDeviceProfile.current.pagePadding
+    Column(Modifier.fillMaxWidth().padding(start = pad, end = pad, bottom = 12.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Episode ${resume.episodeLabel} of $totalEpisodes",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "${(fraction * 100).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        WatchProgressBar(
+            fraction = fraction,
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+        )
     }
 }
 
@@ -616,7 +661,12 @@ private fun SeasonFilterRow(
 }
 
 @Composable
-private fun DetailEpisodeRow(episode: EpisodeItem, fallbackImage: String?, onClick: () -> Unit) {
+private fun DetailEpisodeRow(
+    episode: EpisodeItem,
+    fallbackImage: String?,
+    onClick: () -> Unit,
+    watchedFraction: Float = 0f,
+) {
     val selectedImage = episode.image ?: fallbackImage
     Row(
         modifier = Modifier
@@ -640,11 +690,18 @@ private fun DetailEpisodeRow(episode: EpisodeItem, fallbackImage: String?, onCli
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.White,
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
+                    .align(if (watchedFraction > 0.01f) Alignment.TopEnd else Alignment.BottomEnd)
                     .padding(5.dp)
                     .clip(RoundedCornerShape(5.dp))
                     .background(Color.Black.copy(alpha = 0.78f))
                     .padding(horizontal = 6.dp, vertical = 3.dp),
+            )
+            WatchProgressBar(
+                fraction = watchedFraction,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 5.dp),
             )
         }
         Column(Modifier.weight(1f).padding(start = 13.dp)) {

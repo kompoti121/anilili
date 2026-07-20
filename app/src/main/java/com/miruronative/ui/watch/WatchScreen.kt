@@ -105,6 +105,7 @@ import com.miruronative.playback.PlaybackService
 import com.miruronative.ui.UiState
 import com.miruronative.ui.components.ErrorBox
 import com.miruronative.ui.components.LoadingBox
+import com.miruronative.ui.components.episodeWatchFraction
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
 import kotlinx.coroutines.delay
@@ -567,6 +568,8 @@ private fun WatchContent(
         val episodeRows = remember(data.episodes, device.episodeColumns) {
             data.episodes.withIndex().chunked(device.episodeColumns)
         }
+        val tvHistory by LibraryStore.history.collectAsState()
+        val tvResume = tvHistory.firstOrNull { it.anilistId == data.anilistId }
         LazyColumn(
             modifier = Modifier.fillMaxWidth().weight(1f),
             state = tvEpisodeListState,
@@ -616,6 +619,7 @@ private fun WatchContent(
                         EpisodeChip(
                             episode = episode,
                             selected = index == data.currentIndex,
+                            watchedFraction = episodeWatchFraction(tvResume, episode.number),
                             modifier = Modifier.weight(1f),
                             onClick = { onSelectEpisode(index) },
                         )
@@ -857,6 +861,8 @@ private fun MobileWatchDetails(
     modifier: Modifier = Modifier,
 ) {
     val pad = LocalAppDeviceProfile.current.pagePadding
+    val historyEntries by LibraryStore.history.collectAsState()
+    val resume = historyEntries.firstOrNull { it.anilistId == data.anilistId }
     LazyColumn(modifier = modifier) {
         item {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -900,6 +906,7 @@ private fun MobileWatchDetails(
                 episode = episode,
                 fallbackImage = data.artworkUrl,
                 selected = index == data.currentIndex,
+                watchedFraction = episodeWatchFraction(resume, episode.number),
                 onClick = { onSelectEpisode(index) },
             )
         }
@@ -913,6 +920,7 @@ private fun MobileEpisodeRow(
     fallbackImage: String?,
     selected: Boolean,
     onClick: () -> Unit,
+    watchedFraction: Float = 0f,
 ) {
     Row(
         modifier = Modifier
@@ -940,11 +948,18 @@ private fun MobileEpisodeRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.White,
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
+                    .align(if (watchedFraction > 0.01f) Alignment.TopEnd else Alignment.BottomEnd)
                     .padding(5.dp)
                     .clip(RoundedCornerShape(5.dp))
                     .background(Color.Black.copy(alpha = 0.78f))
                     .padding(horizontal = 6.dp, vertical = 3.dp),
+            )
+            com.miruronative.ui.components.WatchProgressBar(
+                fraction = watchedFraction,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 5.dp),
             )
         }
         Column(Modifier.weight(1f).padding(start = 13.dp)) {
@@ -1514,6 +1529,7 @@ private fun EpisodeChip(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    watchedFraction: Float = 0f,
 ) {
     val background = when {
         selected -> MaterialTheme.colorScheme.primary
@@ -1560,6 +1576,16 @@ private fun EpisodeChip(
                 color = if (selected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
                 else MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.align(Alignment.TopEnd).padding(top = 2.dp, end = 5.dp),
+            )
+        }
+        // Watched underline: the selected chip is already fully highlighted, so it skips it.
+        if (!selected) {
+            com.miruronative.ui.components.WatchProgressBar(
+                fraction = watchedFraction,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
             )
         }
     }
