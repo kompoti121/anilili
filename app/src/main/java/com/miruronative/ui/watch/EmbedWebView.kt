@@ -6,7 +6,9 @@ import android.content.ContextWrapper
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
@@ -21,32 +23,28 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -61,13 +59,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -87,7 +85,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
-import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.adaptive.rememberScreenReaderActive
 import com.miruronative.ui.components.CaptionAppearanceDialog
 import kotlinx.coroutines.delay
@@ -114,6 +111,8 @@ fun EmbedWebView(
     hasPreviousEpisode: Boolean = false,
     hasNextEpisode: Boolean = false,
     focusPlayerOnStart: Boolean = true,
+    isFullscreen: Boolean = false,
+    onToggleFullscreen: (() -> Unit)? = null,
     onFullscreenChanged: (Boolean) -> Unit = {},
     onProgress: ((positionMs: Long, durationMs: Long) -> Unit)? = null,
     onPlaybackError: ((message: String, streamUrl: String, positionMs: Long) -> Unit)? = null,
@@ -133,8 +132,6 @@ fun EmbedWebView(
     var activeUrl by remember(url) { mutableStateOf(url) }
     val activeQualityStream = embedQualityStreams.firstOrNull { it.url == activeUrl }
     val activeReferer = activeQualityStream?.referer ?: referer
-    var qualityDialogVisible by remember(url) { mutableStateOf(false) }
-    var speedDialogVisible by remember(url) { mutableStateOf(false) }
     var captionAppearanceVisible by remember(url) { mutableStateOf(false) }
     var settingsSheetVisible by remember(url) { mutableStateOf(false) }
     var playbackSpeed by remember(url) { mutableStateOf(1f) }
@@ -156,8 +153,6 @@ fun EmbedWebView(
     // capture the value it was created with.
     val currentPlayerOwnsRemote by rememberUpdatedState(focusPlayerOnStart)
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    val previousFocus = remember { FocusRequester() }
-    val nextFocus = remember { FocusRequester() }
     val currentPendingSeekMs by rememberUpdatedState(pendingSeekMs)
     var positionMs by remember(url) { mutableLongStateOf(startPositionMs) }
     var durationMs by remember(url) { mutableLongStateOf(0L) }
@@ -175,6 +170,14 @@ fun EmbedWebView(
     var tvControlsInteraction by remember(url) { mutableIntStateOf(0) }
     var touchControlsVisible by remember(url) { mutableStateOf(true) }
     var touchControlsInteraction by remember(url) { mutableIntStateOf(0) }
+    var fallbackControlsVisible by remember(url) { mutableStateOf(true) }
+    var fallbackInteraction by remember(url) { mutableIntStateOf(0) }
+    // A cross-origin page reports nothing back, so the bar for those servers keeps its own guess
+    // at the playback state: the embed autoplays, and every press flips it.
+    var fallbackIsPlaying by remember(url) { mutableStateOf(true) }
+    // While set, the page owns touches again: our overlay steps aside so the provider's own bar —
+    // the only scrubber those servers give us — is reachable, then we take the screen back.
+    var providerControlsMode by remember(url) { mutableStateOf(false) }
     val tvPlayPauseFocus = remember { FocusRequester() }
     val currentActiveUrl by rememberUpdatedState(activeUrl)
     val currentPositionMs by rememberUpdatedState(positionMs)
@@ -195,14 +198,33 @@ fun EmbedWebView(
         onDispose { currentOnPlaybackStopperChanged?.invoke(null) }
     }
 
-    // Our own touch controls take over whenever the injected JS can reach the <video>; a
-    // cross-origin embed is untouchable, so the provider's UI stays in charge there.
+    // Full touch controls — seek bar and all — whenever the injected JS can reach the <video>.
     val touchControlsActive = !device.isTv && webPlaybackAvailable && loadError == null
+    // Everything else: the page is out of reach, so this bar carries only what the app itself can
+    // answer — episode moves, settings, fullscreen — plus a play/pause relayed as a real touch.
+    val fallbackControlsActive = !device.isTv && !webPlaybackAvailable && loadError == null
 
     LaunchedEffect(touchControlsActive, touchControlsVisible, touchControlsInteraction, webIsPlaying) {
         if (!touchControlsActive || !touchControlsVisible || !webIsPlaying) return@LaunchedEffect
         delay(4_000)
         touchControlsVisible = false
+    }
+
+    LaunchedEffect(fallbackControlsActive, fallbackControlsVisible, fallbackInteraction) {
+        if (!fallbackControlsActive || !fallbackControlsVisible) return@LaunchedEffect
+        delay(4_000)
+        fallbackControlsVisible = false
+    }
+    // Meet the video with the bar once the page is up, the way the first tap would.
+    LaunchedEffect(fallbackControlsActive, finishedUrl) {
+        if (fallbackControlsActive && finishedUrl != null) fallbackControlsVisible = true
+    }
+    // The provider's chrome hides itself a few seconds after the touch that raised it, so take
+    // the screen back on roughly that beat.
+    LaunchedEffect(providerControlsMode) {
+        if (!providerControlsMode) return@LaunchedEffect
+        delay(8_000)
+        providerControlsMode = false
     }
 
     LaunchedEffect(tvControlsVisible, focusPlayerOnStart) {
@@ -466,65 +488,6 @@ fun EmbedWebView(
         Modifier
     }
     Box(modifier.then(remoteModifier)) {
-        if (qualityDialogVisible) {
-            AlertDialog(
-                onDismissRequest = { qualityDialogVisible = false },
-                title = { Text("Quality") },
-                text = {
-                    Column {
-                        embedQualityStreams.forEach { option ->
-                            val height = option.height ?: declaredVideoHeight(option.quality) ?: return@forEach
-                            val selected = option.url == activeUrl
-                            TextButton(
-                                onClick = {
-                                    DiagnosticsLog.event(
-                                        "EmbedWebView quality selection height=$height resumeMs=$positionMs",
-                                    )
-                                    pendingSeekMs = positionMs
-                                    activeUrl = option.url
-                                    qualityDialogVisible = false
-                                },
-                            ) {
-                                Text("${height}p${if (selected) " ✓" else ""}")
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { qualityDialogVisible = false }) { Text("Close") }
-                },
-            )
-        }
-        if (speedDialogVisible) {
-            AlertDialog(
-                onDismissRequest = { speedDialogVisible = false },
-                title = { Text("Playback speed") },
-                text = {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 420.dp)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        PlaybackSpeeds.forEach { speed ->
-                            val selected = kotlin.math.abs(playbackSpeed - speed) < 0.01f
-                            TextButton(
-                                onClick = {
-                                    DiagnosticsLog.event("EmbedWebView playback speed=${speed.formatPlaybackSpeed()}")
-                                    playbackSpeed = speed
-                                    speedDialogVisible = false
-                                },
-                            ) {
-                                Text("${speed.formatPlaybackSpeed()}${if (selected) " ✓" else ""}")
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { speedDialogVisible = false }) { Text("Close") }
-                },
-            )
-        }
         if (captionAppearanceVisible) {
             CaptionAppearanceDialog(
                 onDismiss = { captionAppearanceVisible = false },
@@ -729,6 +692,28 @@ fun EmbedWebView(
             },
         )
 
+        // The same starvation for servers we cannot script: web players only raise their chrome on
+        // interaction, so swallowing taps is what keeps the provider's bar down and leaves ours the
+        // only one on screen. A tap while our bar is already up is handed to the page instead —
+        // that summons the provider's controls, the sole way to scrub on these servers, and the
+        // screen stays theirs until the pass-through window closes.
+        if (fallbackControlsActive && !providerControlsMode) Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(url) {
+                    detectTapGestures { offset ->
+                        if (fallbackControlsVisible) {
+                            fallbackControlsVisible = false
+                            providerControlsMode = true
+                            dispatchWebTap(webView, offset.x, offset.y)
+                        } else {
+                            fallbackControlsVisible = true
+                            fallbackInteraction++
+                        }
+                    }
+                },
+        )
+
         if (touchControlsActive && touchControlsVisible) {
             EmbedTouchControls(
                 positionMs = positionMs,
@@ -758,6 +743,8 @@ fun EmbedWebView(
                     touchControlsInteraction++
                 },
                 onSettings = { settingsSheetVisible = true },
+                isFullscreen = isFullscreen,
+                onFullscreen = onToggleFullscreen,
                 onInteract = { touchControlsInteraction++ },
             )
         }
@@ -790,94 +777,64 @@ fun EmbedWebView(
             )
         }
 
-        // Fallback for embeds our JS cannot reach (cross-origin iframe): the provider's own UI
-        // stays in charge, and this row only adds what the page cannot know about. Sits above
-        // the embed's control bar rather than over the picture; the inset clears a typical bar,
-        // since there is no real height to measure from here.
-        if (!device.isTv && !webPlaybackAvailable) Row(
+        // One bar for the servers our JS cannot reach, sitting where a player's controls belong:
+        // episode moves and play/pause on the left, settings and fullscreen on the right. There is
+        // no position or duration to build a scrubber from, so seeking stays the provider's.
+        if (fallbackControlsActive && fallbackControlsVisible) Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 72.dp)
-                .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(4.dp))
-                .onPreviewKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    when {
-                        event.key == Key.MediaNext && currentHasNextEpisode -> {
-                            currentOnNextEpisode?.invoke()
-                            true
-                        }
-                        event.key == Key.MediaPrevious && currentHasPreviousEpisode -> {
-                            currentOnPreviousEpisode?.invoke()
-                            true
-                        }
-                        event.key == Key.DirectionDown -> {
-                            webView?.requestFocus()
-                            true
-                        }
-                        else -> false
-                    }
-                }
-                .focusGroup(),
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))),
+                )
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(
-                onClick = { currentOnPreviousEpisode?.invoke() },
-                enabled = hasPreviousEpisode && currentOnPreviousEpisode != null,
-                modifier = Modifier
-                    .focusRequester(previousFocus)
-                    .focusHighlight(RoundedCornerShape(4.dp)),
-            ) {
-                Icon(
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PlayerControlIconButton(
+                    "Previous episode",
                     Icons.Default.SkipPrevious,
-                    contentDescription = "Previous episode",
-                    tint = Color.White,
+                    enabled = hasPreviousEpisode && currentOnPreviousEpisode != null,
+                    onClick = { currentOnPreviousEpisode?.invoke() },
                 )
-            }
-            IconButton(
-                onClick = { currentOnNextEpisode?.invoke() },
-                enabled = hasNextEpisode && currentOnNextEpisode != null,
-                modifier = Modifier
-                    .focusRequester(nextFocus)
-                    .focusHighlight(RoundedCornerShape(4.dp)),
-            ) {
-                Icon(
+                PlayerControlIconButton(
+                    if (fallbackIsPlaying) "Pause" else "Play",
+                    if (fallbackIsPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    onClick = {
+                        DiagnosticsLog.event("EmbedWebView fallback playPause")
+                        // Nothing scripted reaches this player, but a touch does, so press the
+                        // picture where a finger would. Dead centre is where providers park their
+                        // own next-episode overlay, hence the aim above it.
+                        dispatchWebTapAt(webView, 0.5f, 0.32f)
+                        fallbackIsPlaying = !fallbackIsPlaying
+                        fallbackInteraction++
+                    },
+                )
+                PlayerControlIconButton(
+                    "Next episode",
                     Icons.Default.SkipNext,
-                    contentDescription = "Next episode",
-                    tint = Color.White,
+                    enabled = hasNextEpisode && currentOnNextEpisode != null,
+                    onClick = { currentOnNextEpisode?.invoke() },
                 )
             }
-            if (embedQualityStreams.size > 1) {
-                IconButton(
-                    onClick = { qualityDialogVisible = true },
-                    modifier = Modifier.focusHighlight(RoundedCornerShape(4.dp)),
-                ) {
-                    Icon(
-                        Icons.Default.Settings,
-                        contentDescription = "Quality",
-                        tint = Color.White,
-                    )
-                }
-            }
-            if (webPlaybackAvailable) {
-                IconButton(
-                    onClick = { speedDialogVisible = true },
-                    modifier = Modifier.focusHighlight(RoundedCornerShape(4.dp)),
-                ) {
-                    Icon(
-                        Icons.Default.Speed,
-                        contentDescription = "Playback speed",
-                        tint = Color.White,
-                    )
-                }
-                // Gated on a reachable <video>: with none found, the page is cross-origin and the
-                // injected stylesheet cannot land, so offering the control would be a lie.
-                IconButton(
-                    onClick = { captionAppearanceVisible = true },
-                    modifier = Modifier.focusHighlight(RoundedCornerShape(4.dp)),
-                ) {
-                    Icon(
-                        Icons.Default.ClosedCaption,
-                        contentDescription = "Caption appearance",
-                        tint = Color.White,
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                PlayerControlIconButton(
+                    "Settings",
+                    Icons.Default.Settings,
+                    onClick = {
+                        settingsSheetVisible = true
+                        fallbackInteraction++
+                    },
+                )
+                onToggleFullscreen?.let { toggle ->
+                    PlayerControlIconButton(
+                        if (isFullscreen) "Exit fullscreen" else "Fullscreen",
+                        if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        onClick = {
+                            toggle()
+                            fallbackInteraction++
+                        },
                     )
                 }
             }
@@ -947,6 +904,7 @@ fun EmbedWebView(
                     DiagnosticsLog.event("EmbedWebView TV control settings")
                     settingsSheetVisible = true
                 },
+                onFullscreen = onToggleFullscreen,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -1289,6 +1247,31 @@ private fun applyDeviceVolume(audioManager: android.media.AudioManager?, value: 
         (value * max).toInt().coerceIn(0, max),
         0,
     )
+}
+
+/**
+ * Presses the page the way a finger would. A cross-origin embed refuses every scripted route into
+ * its player, but a real touch on the WebView reaches whatever sits under it, iframe or not — so
+ * this is how the app's own bar relays play/pause, and how it hands a tap back to the provider.
+ */
+private fun dispatchWebTap(webView: WebView?, x: Float, y: Float) {
+    val web = webView ?: return
+    val downAt = SystemClock.uptimeMillis()
+    val down = MotionEvent.obtain(downAt, downAt, MotionEvent.ACTION_DOWN, x, y, 0)
+    val up = MotionEvent.obtain(downAt, downAt + 48L, MotionEvent.ACTION_UP, x, y, 0)
+    runCatching {
+        web.dispatchTouchEvent(down)
+        web.dispatchTouchEvent(up)
+    }
+    down.recycle()
+    up.recycle()
+}
+
+/** [dispatchWebTap] aimed at a fraction of the view's own box, for callers without pixels. */
+private fun dispatchWebTapAt(webView: WebView?, xFraction: Float, yFraction: Float) {
+    val web = webView ?: return
+    if (web.width <= 0 || web.height <= 0) return
+    dispatchWebTap(web, web.width * xFraction, web.height * yFraction)
 }
 
 private fun stopWebPlayback(webView: WebView) {

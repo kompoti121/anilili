@@ -1,13 +1,15 @@
 package com.miruronative.ui.watch
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 /**
- * The embed player's touch controls: the shared [PlayerControlsScaffold] with a single settings
- * gear as its trailing icon. Drawn over the WebView when the injected JS can reach its `<video>`;
+ * The embed player's touch controls: the shared [PlayerControlsScaffold] with settings and
+ * fullscreen as its trailing icons. Drawn over the WebView when the injected JS reaches its `<video>`;
  * the touch-swallowing layer beneath keeps the provider's own chrome from ever appearing.
  */
 @Composable
@@ -24,6 +26,8 @@ internal fun EmbedTouchControls(
     onNext: () -> Unit,
     onSeek: (Long) -> Unit,
     onSettings: () -> Unit,
+    isFullscreen: Boolean = false,
+    onFullscreen: (() -> Unit)? = null,
     onInteract: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -50,5 +54,15 @@ internal fun EmbedTouchControls(
                 onInteract()
             },
         )
+        onFullscreen?.let { toggle ->
+            PlayerControlIconButton(
+                if (isFullscreen) "Exit fullscreen" else "Fullscreen",
+                if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                onClick = {
+                    toggle()
+                    onInteract()
+                },
+            )
+        }
     }
 }

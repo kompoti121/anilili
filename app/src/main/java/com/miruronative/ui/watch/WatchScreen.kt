@@ -487,18 +487,23 @@ private fun WatchContent(
                                 hasPreviousEpisode = data.hasPrev,
                                 hasNextEpisode = data.hasNext,
                                 focusPlayerOnStart = fullscreen,
+                                isFullscreen = fullscreen,
+                                onToggleFullscreen = onToggleFullscreen,
                                 onFullscreenChanged = onFullscreenChanged,
                                 onProgress = onProgress,
                                 onPlaybackError = onPlaybackError.takeIf { data.provider == "allanime" },
                                 onPlaybackStopperChanged = onPlaybackStopperChanged,
                             )
                             // Embed players often use CSS "web fullscreen" that never reaches the
-                            // WebView fullscreen callback, so the app provides its own toggle.
-                            IconButton(
+                            // WebView fullscreen callback, so the app provides its own toggle. On
+                            // touch it lives in the player's own control bar; a remote has no
+                            // pointer to summon that bar with while the video owns focus, so TV
+                            // keeps a corner button of its own.
+                            if (device.isTv) IconButton(
                                 onClick = onToggleFullscreen,
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
-                                    .focusProperties { canFocus = !device.isTv || fullscreen }
+                                    .focusProperties { canFocus = fullscreen }
                                     .statusBarsPadding()
                                     .padding(4.dp)
                                     .focusHighlight(RoundedCornerShape(24.dp)),
