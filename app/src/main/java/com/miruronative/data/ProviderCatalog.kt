@@ -21,6 +21,11 @@ object ProviderCatalog {
         "senshi", "anibd", "anikoto", "kaa", "allanime", "animekai", "reanime", "anizone", "animegg", "anineko", "2dhive",
     )
 
+    // Providers whose resolution drives the hidden resolver WebView rather than plain HTTP. That
+    // page runs a real player, so resolving one competes for the hardware video decoder with
+    // whatever is already on screen — background validation skips these on TV.
+    val webViewResolverProviders = setOf("reanime")
+
     // The consistently quick Anivexa lookups (API-backed, not full-page scrapers). Raced as an
     // early partial catalog when the Miruro pipe is down or slow, so playback never waits for
     // the 15-second stragglers; the remaining providers still merge in behind.

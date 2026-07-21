@@ -116,6 +116,13 @@ class WatchSourcePolicyTest {
     }
 
     @Test
+    fun `tv leaves webview-resolved providers out of the background sweep`() {
+        assertEquals(false, validatesDuringPlayback("reanime", isTv = true))
+        assertTrue(validatesDuringPlayback("reanime", isTv = false))
+        assertTrue(validatesDuringPlayback("bonk", isTv = true))
+    }
+
+    @Test
     fun `tv controls keep progress display out of remote focus order`() {
         assertEquals(
             listOf(

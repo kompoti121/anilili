@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import com.miruronative.data.AppGraph
 import com.miruronative.diagnostics.CrashReporter
 import java.io.IOException
 import java.util.Locale
@@ -59,6 +60,14 @@ enum class DefaultQuality(val storedValue: String, val label: String) {
     }
 }
 
+/**
+ * The quality to use before the viewer has chosen one. TV sticks start adaptive: pinning the
+ * highest rendition turns ABR off, so a hardware decoder that gets preempted or falls behind has
+ * no lower rung to drop to and the picture simply dies. Everything else opens at its sharpest.
+ */
+private fun deviceDefaultQuality(): DefaultQuality =
+    if (AppGraph.isTv) DefaultQuality.AUTO else DefaultQuality.HIGHEST
+
 /** No global server has been chosen yet; the launch route supplies the initial server. */
 const val DEFAULT_PREFERRED_PROVIDER = "auto"
 
@@ -102,7 +111,7 @@ object SettingsStore {
     private val _menuLanguage = MutableStateFlow(MenuLanguage.SYSTEM)
     val menuLanguage = _menuLanguage.asStateFlow()
 
-    private val _defaultQuality = MutableStateFlow(DefaultQuality.HIGHEST)
+    private val _defaultQuality = MutableStateFlow(deviceDefaultQuality())
     val defaultQuality = _defaultQuality.asStateFlow()
 
     private val _preferredProvider = MutableStateFlow(DEFAULT_PREFERRED_PROVIDER)
@@ -209,7 +218,8 @@ object SettingsStore {
         _updateCheckOnLaunch.value = prefs[UPDATE_CHECK_ON_LAUNCH] ?: true
         _captionStyle.value = readCaptionStyle(prefs)
         _menuLanguage.value = MenuLanguage.fromStored(prefs[MENU_LANGUAGE])
-        _defaultQuality.value = DefaultQuality.fromStored(prefs[DEFAULT_QUALITY])
+        _defaultQuality.value = prefs[DEFAULT_QUALITY]?.let(DefaultQuality::fromStored)
+            ?: deviceDefaultQuality()
         _preferredProvider.value =
             prefs[PREFERRED_PROVIDER]?.takeIf(String::isNotBlank) ?: DEFAULT_PREFERRED_PROVIDER
         loaded.value = true

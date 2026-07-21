@@ -14,6 +14,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.miruronative.data.AppGraph
 import com.miruronative.diagnostics.DiagnosticsLog
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -129,7 +130,10 @@ object FlixcloudBridge {
     suspend fun resolve(
         embedUrl: String,
         referer: String?,
-        timeoutMs: Long = 12_000,
+        // A resolve that is going nowhere still holds the hidden page open until it expires. TV
+        // sticks give up sooner and fall back to the embed rather than keep a second player
+        // parked alongside playback.
+        timeoutMs: Long = if (AppGraph.isTv) 5_000 else 12_000,
     ): FlixcloudResolvedStream? = mutex.withLock {
         val id = counter.incrementAndGet().toString()
         val deferred = CompletableDeferred<FlixcloudResolvedStream?>()
@@ -207,10 +211,20 @@ object FlixcloudBridge {
                }
             } catch (e) {}
           }
-          function muteVideos() {
+          // The page is opened with autoPlay so it runs its own decrypt flow, but nothing here
+          // needs a decoded frame: the URL is captured from loadSource/fetch/XHR. Leaving the
+          // video playing costs a hardware decoder instance, and a TV stick only has one to give
+          // — the system then preempts the episode the viewer is actually watching. Keep the page
+          // running and the picture stopped.
+          function quietVideos() {
             try {
               var videos = document.querySelectorAll('video');
-              for (var i = 0; i < videos.length; i++) videos[i].muted = true;
+              for (var i = 0; i < videos.length; i++) {
+                var video = videos[i];
+                video.muted = true;
+                video.autoplay = false;
+                if (!video.paused) video.pause();
+              }
             } catch (e) {}
           }
           function hookHls() {
@@ -250,8 +264,8 @@ object FlixcloudBridge {
             }
           } catch (e) {}
           hookHls();
-          muteVideos();
-          setInterval(function() { hookHls(); muteVideos(); }, 100);
+          quietVideos();
+          setInterval(function() { hookHls(); quietVideos(); }, 100);
         })();
     """.trimIndent()
 

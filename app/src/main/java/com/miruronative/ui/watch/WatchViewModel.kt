@@ -745,7 +745,8 @@ class WatchViewModel : ViewModel() {
             if (AppGraph.isTv) kotlinx.coroutines.delay(10_000)
             val candidates = availableSourceOptions(mergedEpisodes, number).filter { option ->
                 val key = EpisodeSourceKey(number, option.provider, option.category)
-                key !in confirmedSources && key !in unavailableSources
+                if (key in confirmedSources || key in unavailableSources) return@filter false
+                validatesDuringPlayback(option.provider, AppGraph.isTv)
             }
             if (candidates.isEmpty()) {
                 val data = (_state.value as? UiState.Success)?.data
@@ -931,6 +932,15 @@ internal fun preferredProviderForWatch(storedPreferred: String?, routeProvider: 
     if (stored.isNotBlank() && stored != DEFAULT_PREFERRED_PROVIDER) return stored
     return routeProvider.trim().lowercase().ifBlank { DEFAULT_PREFERRED_PROVIDER }
 }
+
+/**
+ * Whether the background sweep may confirm this provider while an episode is on screen.
+ * Providers that resolve through the hidden WebView run a real player to do it, and a TV stick has
+ * one hardware video decoder — the resolver takes it and the system preempts playback. On TV those
+ * stay unvalidated; selecting one by hand still resolves, because then nothing else holds it.
+ */
+internal fun validatesDuringPlayback(provider: String, isTv: Boolean): Boolean =
+    !(isTv && provider in ProviderCatalog.webViewResolverProviders)
 
 private fun bestHls(streams: List<StreamItem>): StreamItem? = streams
     .filter(StreamItem::isHls)
