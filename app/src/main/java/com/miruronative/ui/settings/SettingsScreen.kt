@@ -70,6 +70,7 @@ import com.miruronative.ui.UiState
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.components.CaptionAppearanceDialog
+import com.miruronative.ui.components.LocalAppChromeBottomInset
 import com.miruronative.ui.components.ScrollAwareTopBar
 import com.miruronative.ui.profile.AniListProfile
 import com.miruronative.ui.profile.ProfileViewModel
@@ -225,11 +226,14 @@ fun SettingsScreen(
         },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.padding(padding).fillMaxSize(),
+            modifier = Modifier.fillMaxSize(),
+            // Scroll padding, not layout padding: rows travel under the bars instead of the list
+            // being shunted about by them.
             contentPadding = PaddingValues(
                 start = device.pagePadding,
                 end = device.pagePadding,
-                bottom = 32.dp,
+                top = padding.calculateTopPadding(),
+                bottom = padding.calculateBottomPadding() + LocalAppChromeBottomInset.current + 32.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {

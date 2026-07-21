@@ -73,6 +73,7 @@ import com.miruronative.ui.adaptive.TvDeferredTextField
 import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.components.PullRefreshContainer
 import com.miruronative.ui.components.RatingBadge
+import com.miruronative.ui.components.LocalAppChromeBottomInset
 import com.miruronative.ui.components.ScrollAwareTopBar
 import java.time.Instant
 import java.time.ZoneId
@@ -204,11 +205,16 @@ fun ProfileScreen(
         PullRefreshContainer(
             isRefreshing = isRefreshing,
             onRefresh = vm::refresh,
-            modifier = Modifier.padding(padding).fillMaxSize(),
+            modifier = Modifier.fillMaxSize(),
         ) {
+            // Chrome reserved as scroll padding, not layout padding: the list runs the full height
+            // so rows pass under the bars rather than leaving a dead band where one used to be.
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 28.dp),
+                contentPadding = PaddingValues(
+                    top = padding.calculateTopPadding(),
+                    bottom = padding.calculateBottomPadding() + LocalAppChromeBottomInset.current + 28.dp,
+                ),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
             item {

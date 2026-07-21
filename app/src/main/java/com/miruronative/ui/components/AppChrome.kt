@@ -5,21 +5,30 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.Layout
-import kotlin.math.roundToInt
+import androidx.compose.ui.unit.dp
 
 /** Shared visibility signal for screen chrome while the user is actively browsing a list. */
 val LocalAppChromeVisible = compositionLocalOf { true }
 
 /**
+ * Room the overlaying chrome takes at the bottom of the window. The navigation bar draws over the
+ * content rather than displacing it, so scrollable screens have to reserve this themselves or
+ * their last rows sit underneath it forever.
+ */
+val LocalAppChromeBottomInset = compositionLocalOf { 0.dp }
+
+/**
  * Keeps each screen's own top bar in sync with the root navigation bar.
  *
- * The bar collapses by animating its measured height to zero while the content slides up with
- * it, instead of entering/leaving composition. AnimatedVisibility removed the bar from layout in
- * one frame at the end of its transition, which snapped the scaffold padding and made the list
- * underneath jump by the bar height every time the chrome came back.
+ * The bar keeps its full measured height whatever it is doing and slides out via a layer, so the
+ * scaffold padding handed to the screen never changes and nothing below it is re-laid out. Earlier
+ * versions animated the measured height to zero, which was smooth but still moved every item on
+ * the screen by the bar height each time the chrome came and went.
+ *
+ * Screens must apply that padding as *scroll* padding (`contentPadding`) rather than layout
+ * padding, so the list occupies the whole window and its rows pass under the bar as it retreats.
+ * Applying it with `Modifier.padding` instead leaves a dead band where the bar used to be.
  */
 @Composable
 fun ScrollAwareTopBar(content: @Composable () -> Unit) {
@@ -29,15 +38,14 @@ fun ScrollAwareTopBar(content: @Composable () -> Unit) {
         animationSpec = tween(220),
         label = "topBarShift",
     )
-    Layout(content = content, modifier = Modifier.clipToBounds()) { measurables, constraints ->
+    Layout(content = content) { measurables, constraints ->
         val placeables = measurables.map { it.measure(constraints) }
-        val fullHeight = placeables.maxOfOrNull { it.height } ?: 0
+        val height = placeables.maxOfOrNull { it.height } ?: 0
         val width = placeables.maxOfOrNull { it.width } ?: 0
-        val height = (fullHeight * (1f - shift)).roundToInt().coerceAtLeast(0)
         layout(width, height) {
             placeables.forEach { placeable ->
-                placeable.placeWithLayer(0, height - placeable.height) {
-                    alpha = 1f - shift
+                placeable.placeWithLayer(0, 0) {
+                    translationY = -height * shift
                 }
             }
         }

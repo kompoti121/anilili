@@ -86,6 +86,7 @@ import com.miruronative.ui.components.LoadingBox
 import com.miruronative.ui.components.AnimeCard
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
+import com.miruronative.ui.components.LocalAppChromeBottomInset
 import com.miruronative.ui.components.PullRefreshContainer
 import com.miruronative.ui.components.ScrollAwareTopBar
 import kotlinx.coroutines.delay
@@ -182,10 +183,12 @@ fun HomeScreen(
                 }
             }
             is UiState.Error -> ErrorBox(s.message, vm::load, Modifier.padding(padding))
+            // The grid fills the window and reserves the chrome as scroll padding, so rows pass
+            // under the bars as they retreat instead of being shunted about by them.
             is UiState.Success -> PullRefreshContainer(
                 isRefreshing = isRefreshing,
                 onRefresh = vm::refresh,
-                modifier = Modifier.padding(padding).fillMaxSize(),
+                modifier = Modifier.fillMaxSize(),
             ) {
                 HomeContent(
                     data = s.data,
@@ -195,6 +198,7 @@ fun HomeScreen(
                     onAnimeClick = onAnimeClick,
                     onWatchNow = onWatchNow,
                     onResume = onResume,
+                    contentPadding = padding,
                 )
             }
         }
@@ -250,8 +254,10 @@ private fun HomeContent(
     onWatchNow: (Int) -> Unit,
     onResume: (HistoryEntry) -> Unit,
     modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(),
 ) {
     val device = LocalAppDeviceProfile.current
+    val chromeBottomInset = LocalAppChromeBottomInset.current
     val continueFocusRequester = remember { FocusRequester() }
     LaunchedEffect(data, history.size) {
         DiagnosticsLog.event(
@@ -283,7 +289,12 @@ private fun HomeContent(
         }
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 28.dp),
+            // The navigation bar floats over the list, so the tail has to clear it by its own
+            // height or the last row — Trending, usually — stays buried under the tabs.
+            contentPadding = PaddingValues(
+                top = contentPadding.calculateTopPadding(),
+                bottom = contentPadding.calculateBottomPadding() + chromeBottomInset + 28.dp,
+            ),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {

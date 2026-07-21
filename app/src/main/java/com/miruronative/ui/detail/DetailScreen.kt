@@ -144,9 +144,10 @@ fun DetailScreen(
                 PullRefreshContainer(
                     isRefreshing = isRefreshing,
                     onRefresh = { vm.refresh(animeId) },
-                    modifier = Modifier.padding(padding).fillMaxSize(),
+                    modifier = Modifier.fillMaxSize(),
                 ) {
                     DetailContent(
+                        contentPadding = padding,
                         data = s.data,
                         saved = saved,
                         resume = history.firstOrNull { it.anilistId == animeId },
@@ -185,6 +186,7 @@ private fun DetailContent(
     onAnimeClick: (Int) -> Unit,
     onSeasonWatch: (Int) -> Unit,
     onSelectSeason: (Int) -> Unit,
+    contentPadding: PaddingValues = PaddingValues(),
 ) {
     val info = data.info
     val device = LocalAppDeviceProfile.current
@@ -217,7 +219,11 @@ private fun DetailContent(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 30.dp),
+        // Scroll padding, not layout padding, so rows travel under the bar as it retreats.
+        contentPadding = PaddingValues(
+            top = contentPadding.calculateTopPadding(),
+            bottom = contentPadding.calculateBottomPadding() + 30.dp,
+        ),
     ) {
         item { DetailHero(info) }
         item {

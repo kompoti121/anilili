@@ -93,6 +93,7 @@ import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.adaptive.rememberAppDeviceProfile
 import com.miruronative.ui.nav.Routes
+import com.miruronative.ui.components.LocalAppChromeBottomInset
 import com.miruronative.ui.components.LocalAppChromeVisible
 import com.miruronative.ui.notifications.NotificationsScreen
 import com.miruronative.ui.profile.ProfileScreen
@@ -319,9 +320,12 @@ private fun MiruroRoot(
                     restoreChromeJob?.cancel()
                 }
                 if (!chromeVisible) {
+                    // Long enough that a pause mid-scroll does not summon the navigation bar
+                    // under a thumb already on its way to a poster, short enough that the bars
+                    // feel available rather than dismissed.
                     restoreChromeJob?.cancel()
                     restoreChromeJob = chromeScope.launch {
-                        delay(700)
+                        delay(1_000)
                         chromeVisible = true
                     }
                 }
@@ -369,9 +373,16 @@ private fun MiruroRoot(
         DiagnosticsLog.event("UpdateManager.autoCheckIfDue complete")
     }
 
+    val navBarInsetForChrome = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val hasPhoneBottomBarForChrome = showBottomBar && !deviceProfile.useNavigationRail
     CompositionLocalProvider(
         LocalAppDeviceProfile provides deviceProfile,
         LocalAppChromeVisible provides (chromeVisible || deviceProfile.isTv),
+        LocalAppChromeBottomInset provides if (hasPhoneBottomBarForChrome) {
+            PhoneNavigationBarHeight + navBarInsetForChrome
+        } else {
+            0.dp
+        },
     ) {
         NotificationPermissionEffect()
         UpdatePromptHost()
@@ -441,6 +452,8 @@ private fun MiruroRoot(
             if (resolverWebViewsReady) {
                 PipeWebView()
                 FlixcloudResolverWebView()
+                // Only carried once adult content is on. A viewer who never enables it does not
+                // pay for a third resident WebView — which matters most on memory-starved sticks.
             }
         }
     }

@@ -165,7 +165,7 @@ fun NotificationsScreen(
             ) }
         },
     ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
+        Box(Modifier.fillMaxSize()) {
             if (token == null) {
                 Column(
                     Modifier.align(Alignment.Center).padding(24.dp),
@@ -192,6 +192,7 @@ fun NotificationsScreen(
                     onTab = { tab = it },
                     onAnimeClick = onAnimeClick,
                     pagePadding = device.pagePadding,
+                    contentPadding = padding,
                 )
             }
         }
@@ -206,6 +207,7 @@ private fun NotificationList(
     onTab: (Tab) -> Unit,
     onAnimeClick: (Int) -> Unit,
     pagePadding: androidx.compose.ui.unit.Dp,
+    contentPadding: PaddingValues = PaddingValues(),
 ) {
     val filtered = items.filter(tab::matches)
     val now = System.currentTimeMillis() / 1000
@@ -219,7 +221,13 @@ private fun NotificationList(
     }
 
     LazyColumn(
-        contentPadding = PaddingValues(start = pagePadding, end = pagePadding, bottom = 32.dp),
+        // Scroll padding, not layout padding, so rows pass under the bar as it retreats.
+        contentPadding = PaddingValues(
+            start = pagePadding,
+            end = pagePadding,
+            top = contentPadding.calculateTopPadding(),
+            bottom = contentPadding.calculateBottomPadding() + 32.dp,
+        ),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
