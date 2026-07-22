@@ -3,6 +3,8 @@ package com.miruronative.ui.adaptive
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
@@ -25,6 +27,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
@@ -91,6 +95,20 @@ fun TvDeferredTextField(
             .then(tvFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .focusProperties { canFocus = !editing }
             .focusHighlight(RoundedCornerShape(10.dp))
+            // The nested text field consumes pointer clicks even while its focus is disabled, so
+            // the shell's clickable callback is never reached by a mouse or touch pointer. Watch
+            // the initial pointer pass without consuming it and enter edit mode before the child
+            // handles the gesture. D-pad Select continues through clickable below.
+            .pointerInput(editing) {
+                if (editing) return@pointerInput
+                awaitEachGesture {
+                    awaitFirstDown(
+                        requireUnconsumed = false,
+                        pass = PointerEventPass.Initial,
+                    )
+                    editing = true
+                }
+            }
             .clickable(onClickLabel = "Edit text", role = Role.Button) { editing = true },
     ) {
         field(

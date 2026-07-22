@@ -667,6 +667,29 @@ fun EmbedWebView(
             },
         )
 
+        // TV normally reveals this bar from WebView key dispatch. Mouse/air-mouse clicks do not
+        // travel through that path, and passing the first click to an embed can also trigger its
+        // provider chrome or an ad. Capture empty-video clicks in Compose instead; the controls
+        // are drawn later and remain directly clickable when visible.
+        if (device.isTv && focusPlayerOnStart && webView != null && loadError == null) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(tvControlsVisible) {
+                        detectTapGestures {
+                            tvControlsInteraction++
+                            if (tvControlsVisible) {
+                                DiagnosticsLog.event("EmbedWebView TV controls closed pointer")
+                                tvControlsVisible = false
+                            } else {
+                                DiagnosticsLog.event("EmbedWebView TV controls opened pointer")
+                                tvControlsVisible = true
+                            }
+                        }
+                    },
+            )
+        }
+
         loadError?.let { message ->
             Column(
                 Modifier

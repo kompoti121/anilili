@@ -49,14 +49,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,6 +75,7 @@ import com.miruronative.data.model.FuzzyDate
 import com.miruronative.data.model.Media
 import com.miruronative.data.settings.EpisodeLayout
 import com.miruronative.data.settings.SettingsStore
+import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.ui.UiState
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
@@ -89,6 +94,7 @@ import com.miruronative.ui.components.episodeWatchFraction
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.android.awaitFrame
 
 private enum class DetailTab(val label: String) {
     HOME("Home"),
@@ -96,7 +102,7 @@ private enum class DetailTab(val label: String) {
     RELATED("Related"),
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun DetailScreen(
     animeId: Int,
@@ -114,6 +120,21 @@ fun DetailScreen(
     val backFocusRequester = remember { FocusRequester() }
     val primaryActionFocusRequester = remember { FocusRequester() }
     val detailActionsReady = state is UiState.Success
+    val device = LocalAppDeviceProfile.current
+    val inputModeManager = LocalInputModeManager.current
+    var backFocusEnabled by remember(animeId, device.isTv) { mutableStateOf(!device.isTv) }
+
+    // Mouse navigation leaves Compose in Touch mode. Keep the top-left Back button out of the
+    // initial TV focus search, switch to Keyboard mode, and request the primary action once its
+    // lazy row exists. Back becomes focusable again as soon as an action actually receives focus.
+    LaunchedEffect(detailActionsReady, device.isTv) {
+        if (device.isTv && detailActionsReady) {
+            val keyboardMode = inputModeManager.requestInputMode(InputMode.Keyboard)
+            awaitFrame()
+            runCatching { primaryActionFocusRequester.requestFocus() }
+            DiagnosticsLog.event("Detail primary action focus requested keyboardMode=$keyboardMode")
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -125,13 +146,10 @@ fun DetailScreen(
                             onClick = onBack,
                             modifier = Modifier
                                 .focusRequester(backFocusRequester)
-                                .then(
-                                    if (detailActionsReady) {
-                                        Modifier.focusProperties { down = primaryActionFocusRequester }
-                                    } else {
-                                        Modifier
-                                    },
-                                )
+                                .focusProperties {
+                                    if (device.isTv && !backFocusEnabled) canFocus = false
+                                    if (detailActionsReady) down = primaryActionFocusRequester
+                                }
                                 .focusHighlight(RoundedCornerShape(24.dp)),
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -182,6 +200,7 @@ fun DetailScreen(
                         onSelectSeason = vm::selectSeason,
                         backFocusRequester = backFocusRequester,
                         primaryActionFocusRequester = primaryActionFocusRequester,
+                        onPrimaryFocusAcquired = { backFocusEnabled = true },
                     )
                 }
             }
@@ -203,6 +222,7 @@ private fun DetailContent(
     onSelectSeason: (Int) -> Unit,
     backFocusRequester: FocusRequester,
     primaryActionFocusRequester: FocusRequester,
+    onPrimaryFocusAcquired: () -> Unit,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
     val info = data.info
@@ -254,6 +274,7 @@ private fun DetailContent(
                 onWatch = playCurrent,
                 backFocusRequester = backFocusRequester,
                 primaryActionFocusRequester = primaryActionFocusRequester,
+                onPrimaryFocusAcquired = onPrimaryFocusAcquired,
             )
         }
         resume?.let { entry ->
@@ -471,6 +492,7 @@ private fun DetailActions(
     onWatch: () -> Unit,
     backFocusRequester: FocusRequester,
     primaryActionFocusRequester: FocusRequester,
+    onPrimaryFocusAcquired: () -> Unit,
 ) {
     val pad = LocalAppDeviceProfile.current.pagePadding
     Row(
@@ -485,6 +507,9 @@ private fun DetailActions(
                     if (!canWatch) Modifier.focusRequester(primaryActionFocusRequester)
                     else Modifier,
                 )
+                .onFocusChanged { state ->
+                    if (state.isFocused || state.hasFocus) onPrimaryFocusAcquired()
+                }
                 .focusProperties { up = backFocusRequester }
                 .focusHighlight(RoundedCornerShape(24.dp)),
         ) {
@@ -504,6 +529,9 @@ private fun DetailActions(
                     if (canWatch) Modifier.focusRequester(primaryActionFocusRequester)
                     else Modifier,
                 )
+                .onFocusChanged { state ->
+                    if (state.isFocused || state.hasFocus) onPrimaryFocusAcquired()
+                }
                 .focusProperties { up = backFocusRequester }
                 .focusHighlight(RoundedCornerShape(24.dp)),
         ) {

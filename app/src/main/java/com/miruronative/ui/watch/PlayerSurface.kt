@@ -759,6 +759,30 @@ fun PlayerSurface(
             modifier = Modifier.fillMaxSize(),
         )
 
+        // A TV can still have a USB/Bluetooth mouse or air-mouse remote. The native PlayerView is
+        // deliberately non-focusable on TV, so give pointer users the same control reveal/hide
+        // behavior as a D-pad key. This layer sits below TvPlayerControls: once the bar is visible,
+        // its buttons receive clicks normally while clicks on empty video dismiss it.
+        if (device.isTv && focusPlayerOnStart && controller != null) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(tvControlsVisible) {
+                        detectTapGestures {
+                            tvControlsInteraction++
+                            if (tvControlsVisible) {
+                                DiagnosticsLog.event("PlayerSurface TV controls closed pointer")
+                                tvControlsVisible = false
+                                runCatching { tvPlayerFocus.requestFocus() }
+                            } else {
+                                DiagnosticsLog.event("PlayerSurface TV controls opened pointer")
+                                tvControlsVisible = true
+                            }
+                        }
+                    },
+            )
+        }
+
         // Phone controls, hidden: the gesture layer owns the surface — tap shows the controls, a
         // vertical drag down the left edge scrubs brightness / right edge volume. A double tap in
         // the outer thirds seeks ±10 s; the center third toggles playback. (TV uses controls.)
