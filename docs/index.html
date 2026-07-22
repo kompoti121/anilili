@@ -133,10 +133,36 @@ h1 {
 }
 .bottom h2 { font-family: var(--font-display); font-weight: 500; font-size: clamp(22px, 3.4vw, 32px); }
 .bottom .hero-cta { margin-top: 30px; animation: none; }
-.dl-alts { margin-top: 22px; font-family: var(--font-mono); font-size: 13px; color: var(--ink-faint); }
-.dl-alts a { color: var(--ink-dim); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
-.dl-alts a:hover { color: var(--violet-bright); }
-.dl-alts .sep { margin: 0 10px; color: var(--violet-deep); }
+.dl-panel {
+  max-width: 480px; margin: 34px auto 0; text-align: left;
+  border: 1px solid var(--line-strong); border-radius: 18px;
+  background: linear-gradient(160deg, #1a1530, #0d0b18);
+  padding: 28px;
+}
+.dl-panel h3 { font-family: var(--font-display); font-size: 15px; font-weight: 500; margin-bottom: 5px; }
+.dl-panel .ver { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-faint); margin-bottom: 20px; }
+.dl-list { display: flex; flex-direction: column; gap: 10px; }
+.dl-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  text-decoration: none; border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px;
+  transition: border-color .2s, background .2s, transform .2s;
+}
+.dl-item:hover { border-color: var(--violet); background: rgba(139,125,250,.08); transform: translateX(4px); }
+.dl-item .name { font-family: var(--font-mono); font-size: 13.5px; color: var(--ink); font-weight: 600; }
+.dl-item .desc { font-size: 12.5px; color: var(--ink-faint); margin-top: 2px; }
+.dl-item .arrow { color: var(--violet); font-size: 18px; flex: none; }
+.dl-item.featured {
+  border-color: var(--violet);
+  background: linear-gradient(120deg, rgba(139,125,250,.18), rgba(91,75,214,.1));
+  box-shadow: 0 0 24px rgba(139,125,250,.18);
+  position: relative;
+}
+.dl-item.featured:hover { background: linear-gradient(120deg, rgba(139,125,250,.26), rgba(91,75,214,.16)); }
+.dl-item.featured .tag {
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: #0a0714; background: linear-gradient(120deg, var(--violet-bright), var(--violet));
+  border-radius: 6px; padding: 2px 8px; margin-left: 8px; vertical-align: 1px;
+}
 
 /* footer */
 footer { border-top: 1px solid var(--line); padding: 40px 0 56px; text-align: center; }
@@ -228,11 +254,24 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 56px; text-align: ce
           Join Telegram
         </a>
       </div>
-      <p class="dl-alts">
-        older 32-bit devices / Fire OS 5: <a href="https://github.com/kompoti121/anilili/releases/latest/download/anilili-armeabi-v7a.apk">armeabi-v7a</a>
-        <span class="sep">◆</span>
-        modern 64-bit: <a href="https://github.com/kompoti121/anilili/releases/latest/download/anilili-arm64-v8a.apk">arm64-v8a</a>
-      </p>
+      <div class="dl-panel">
+        <h3>Direct downloads</h3>
+        <p class="ver">latest release · v0.1.33 · signed</p>
+        <div class="dl-list">
+          <a class="dl-item featured" href="https://github.com/kompoti121/anilili/releases/latest/download/anilili.apk">
+            <span><span class="name">anilili.apk<span class="tag">Recommended</span></span><br /><span class="desc">Universal — works on everything</span></span>
+            <span class="arrow">↓</span>
+          </a>
+          <a class="dl-item" href="https://github.com/kompoti121/anilili/releases/latest/download/anilili-arm64-v8a.apk">
+            <span><span class="name">anilili-arm64-v8a.apk</span><br /><span class="desc">Modern phones &amp; 64-bit TV boxes</span></span>
+            <span class="arrow">↓</span>
+          </a>
+          <a class="dl-item" href="https://github.com/kompoti121/anilili/releases/latest/download/anilili-armeabi-v7a.apk">
+            <span><span class="name">anilili-armeabi-v7a.apk</span><br /><span class="desc">Older 32-bit devices &amp; Fire OS 5 sticks</span></span>
+            <span class="arrow">↓</span>
+          </a>
+        </div>
+      </div>
     </div>
   </div>
 </main>
