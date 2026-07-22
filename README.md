@@ -17,12 +17,12 @@ streams play with ExoPlayer; embed providers and fallback playback use WebView.
 <p align="center">
   <a href="showcase/mobile/01-home.webp"><img src="showcase/mobile/01-home.webp" width="180" alt="Anilili home screen" /></a>
   <a href="showcase/mobile/02-browse.webp"><img src="showcase/mobile/02-browse.webp" width="180" alt="Anime browse screen" /></a>
-  <a href="showcase/mobile/03-filters.webp"><img src="showcase/mobile/03-filters.webp" width="180" alt="Catalog filters" /></a>
+  <a href="showcase/mobile/03-search.webp"><img src="showcase/mobile/03-search.webp" width="180" alt="Anime search results" /></a>
 </p>
 <p align="center">
-  <a href="showcase/mobile/04-search.webp"><img src="showcase/mobile/04-search.webp" width="180" alt="Anime search results" /></a>
-  <a href="showcase/mobile/05-anime-details.webp"><img src="showcase/mobile/05-anime-details.webp" width="180" alt="Anime details and server selection" /></a>
-  <a href="showcase/mobile/06-player.webp"><img src="showcase/mobile/06-player.webp" width="180" alt="Video player and episode grid" /></a>
+  <a href="showcase/mobile/04-details.webp"><img src="showcase/mobile/04-details.webp" width="180" alt="Anime details and server selection" /></a>
+  <a href="showcase/mobile/05-watch.webp"><img src="showcase/mobile/05-watch.webp" width="180" alt="Watch screen with episode list" /></a>
+  <a href="showcase/mobile/06-player-controls.webp"><img src="showcase/mobile/06-player-controls.webp" width="180" alt="Player controls with subtitles and casting" /></a>
 </p>
 
 ## Features
@@ -47,7 +47,7 @@ streams play with ExoPlayer; embed providers and fallback playback use WebView.
 | `app/src/main/java/com/miruronative/data/remote` | AniList, Miruro pipe, and provider clients |
 | `app/src/main/java/com/miruronative/ui` | Compose screens and player UI |
 | `docs/PIPE_PROTOCOL.md` | Notes about the Miruro pipe format |
-| `showcase/mobile` | Six optimized 540×1170 WebP screenshots |
+| `showcase/mobile` | Six optimized 540×1062 WebP screenshots |
 
 ## Build
 
