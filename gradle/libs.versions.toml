@@ -17,6 +17,7 @@ room = "2.8.4"
 datastore = "1.2.1"
 work = "2.11.2"
 appcompat = "1.7.0"
+webkit = "1.16.0"
 junit = "4.13.2"
 zxing = "3.5.3"
 
@@ -44,6 +45,7 @@ androidx-media3-cast = { group = "androidx.media3", name = "media3-cast", versio
 play-services-cronet = { group = "com.google.android.gms", name = "play-services-cronet", version.ref = "playServicesCronet" }
 androidx-fragment-ktx = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "fragment" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }

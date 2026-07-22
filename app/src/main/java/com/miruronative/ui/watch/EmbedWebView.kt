@@ -6,9 +6,7 @@ import android.content.ContextWrapper
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.view.KeyEvent
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
@@ -75,6 +73,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.miruronative.data.model.SkipTimes
 import com.miruronative.data.model.StreamItem
 import com.miruronative.data.settings.CaptionEdgeStyle
@@ -160,9 +160,8 @@ fun EmbedWebView(
     var webIsPlaying by remember(url) { mutableStateOf(false) }
     var webVolume by remember(url) { mutableStateOf(1f) }
     var lastAudibleVolume by remember(url) { mutableStateOf(1f) }
-    // Cross-origin embeds (some Kiwi mirrors) put the video out of the injected JS's reach, so
-    // web-volume calls silently do nothing and a muted page stays muted. The device media
-    // stream is always controllable; it becomes the volume/mute fallback for those servers.
+    // The device media stream remains the volume/mute fallback for old WebView builds that do not
+    // support document-start injection into cross-origin frames.
     val embedAudioManager = remember(context) {
         context.getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
     }
@@ -174,12 +173,8 @@ fun EmbedWebView(
     var playbackGestureIsPlaying by remember(url) { mutableStateOf<Boolean?>(null) }
     var fallbackControlsVisible by remember(url) { mutableStateOf(true) }
     var fallbackInteraction by remember(url) { mutableIntStateOf(0) }
-    // A cross-origin page reports nothing back, so the bar for those servers keeps its own guess
-    // at the playback state: the embed autoplays, and every press flips it.
+    // Compatibility state for old WebViews where a cross-origin frame cannot report playback.
     var fallbackIsPlaying by remember(url) { mutableStateOf(true) }
-    // While set, the page owns touches again: our overlay steps aside so the provider's own bar —
-    // the only scrubber those servers give us — is reachable, then we take the screen back.
-    var providerControlsMode by remember(url) { mutableStateOf(false) }
     val tvPlayPauseFocus = remember { FocusRequester() }
     val currentActiveUrl by rememberUpdatedState(activeUrl)
     val currentPositionMs by rememberUpdatedState(positionMs)
@@ -202,8 +197,8 @@ fun EmbedWebView(
 
     // Full touch controls — seek bar and all — whenever the injected JS can reach the <video>.
     val touchControlsActive = !device.isTv && webPlaybackAvailable && loadError == null
-    // Everything else: the page is out of reach, so this bar carries only what the app itself can
-    // answer — episode moves, settings, fullscreen — plus a play/pause relayed as a real touch.
+    // Old WebView builds without all-frame injection get a reduced native bar. Modern WebViews
+    // report even cross-origin video through the document-start bridge and use the full controls.
     val fallbackControlsActive = !device.isTv && !webPlaybackAvailable && loadError == null
 
     LaunchedEffect(touchControlsActive, touchControlsVisible, touchControlsInteraction, webIsPlaying) {
@@ -228,14 +223,6 @@ fun EmbedWebView(
     LaunchedEffect(fallbackControlsActive, finishedUrl) {
         if (fallbackControlsActive && finishedUrl != null) fallbackControlsVisible = true
     }
-    // The provider's chrome hides itself a few seconds after the touch that raised it, so take
-    // the screen back on roughly that beat.
-    LaunchedEffect(providerControlsMode) {
-        if (!providerControlsMode) return@LaunchedEffect
-        delay(8_000)
-        providerControlsMode = false
-    }
-
     LaunchedEffect(tvControlsVisible, focusPlayerOnStart) {
         if (!tvControlsVisible || !focusPlayerOnStart) return@LaunchedEffect
         delay(32)
@@ -305,7 +292,7 @@ fun EmbedWebView(
     LaunchedEffect(webPlaybackAvailable, playbackSpeed, webView) {
         val web = webView ?: return@LaunchedEffect
         if (!webPlaybackAvailable) return@LaunchedEffect
-        web.evaluateJavascript(SET_PLAYBACK_SPEED_JS(playbackSpeed), null)
+        dispatchWebPlayerCommand(web, "speed", playbackSpeed.toDouble(), SET_PLAYBACK_SPEED_JS(playbackSpeed))
     }
 
     // Kwik (and any other Plyr embed) opens on a poster and waits for a gesture, so the episode
@@ -314,12 +301,11 @@ fun EmbedWebView(
     LaunchedEffect(webPlaybackAvailable, webView) {
         val web = webView ?: return@LaunchedEffect
         if (!webPlaybackAvailable) return@LaunchedEffect
-        web.evaluateJavascript(START_PLAYBACK_JS, null)
+        dispatchWebPlayerCommand(web, "play", fallbackScript = START_PLAYBACK_JS)
     }
 
-    // Our bar and the provider's would otherwise stack on screen. Only pull theirs once ours is
-    // actually driving the video: on a server the poll cannot reach, the provider's chrome is the
-    // only working control and hiding it would leave nothing at all.
+    // Document-start injection below normally hides provider chrome before its first paint. Repeat
+    // once our controls become active for older WebViews that only support main-frame evaluation.
     LaunchedEffect(webPlaybackAvailable, webView) {
         val web = webView ?: return@LaunchedEffect
         if (!webPlaybackAvailable) return@LaunchedEffect
@@ -390,9 +376,19 @@ fun EmbedWebView(
                 navigationLock.locked = true
                 finishedUrl = url
                 DiagnosticsLog.event("EmbedWebView page finished host=${url.hostOrNone()} title=${view?.title ?: "none"}")
+                // Fallback for old WebView providers without DOCUMENT_START_SCRIPT. This can only
+                // reach the main document; supported providers get every frame at document start.
+                view?.evaluateJavascript(HIDE_PROVIDER_CHROME_JS, null)
                 view?.evaluateJavascript(PROGRESS_POLL_JS, null)
                 if (currentPendingSeekMs > 0L) {
-                    view?.evaluateJavascript(RESUME_WHEN_READY_JS(currentPendingSeekMs / 1000.0), null)
+                    view?.let {
+                        dispatchWebPlayerCommand(
+                            it,
+                            "resumeAt",
+                            currentPendingSeekMs / 1000.0,
+                            RESUME_WHEN_READY_JS(currentPendingSeekMs / 1000.0),
+                        )
+                    }
                 }
             }
 
@@ -446,7 +442,7 @@ fun EmbedWebView(
                 when (event) {
                     Lifecycle.Event.ON_PAUSE,
                     Lifecycle.Event.ON_STOP -> {
-                        runCatching { web.evaluateJavascript(PAUSE_VIDEO_JS, null) }
+                        dispatchWebPlayerCommand(web, "pause", fallbackScript = PAUSE_VIDEO_JS)
                         web.onPause()
                         web.pauseTimers()
                     }
@@ -539,23 +535,36 @@ fun EmbedWebView(
                             if (device.isTv && !currentPlayerOwnsRemote) return false
                             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                                 when {
-                                    device.isTv && (
-                                        event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
-                                            event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
-                                            event.keyCode == KeyEvent.KEYCODE_DPAD_UP ||
-                                            event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN
-                                        ) -> {
+                                    device.isTv && opensTvPlayerControls(event.keyCode) -> {
                                         mainHandler.post {
                                             tvControlsVisible = true
                                             tvControlsInteraction++
                                         }
                                         return true
                                     }
-                                    event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                        event.keyCode == KeyEvent.KEYCODE_ENTER ||
-                                        event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                                        evaluateJavascript(REMOTE_TOGGLE_PLAYBACK_JS, null)
+                                    event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                                        dispatchWebPlayerCommand(this, "toggle", fallbackScript = REMOTE_TOGGLE_PLAYBACK_JS)
                                         mainHandler.post { webIsPlaying = !webIsPlaying }
+                                        return true
+                                    }
+                                    event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                                        dispatchWebPlayerCommand(this, "play", fallbackScript = START_PLAYBACK_JS)
+                                        mainHandler.post { webIsPlaying = true }
+                                        return true
+                                    }
+                                    event.keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                                        dispatchWebPlayerCommand(this, "pause", fallbackScript = PAUSE_VIDEO_JS)
+                                        mainHandler.post { webIsPlaying = false }
+                                        return true
+                                    }
+                                    event.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                                        mainHandler.post {
+                                            seekWebVideo(this, (currentPositionMs - 10_000L).coerceAtLeast(0L))
+                                        }
+                                        return true
+                                    }
+                                    event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                                        mainHandler.post { seekWebVideo(this, currentPositionMs + 10_000L) }
                                         return true
                                     }
                                     event.keyCode == KeyEvent.KEYCODE_MEDIA_NEXT && currentHasNextEpisode -> {
@@ -618,6 +627,7 @@ fun EmbedWebView(
                         )
                         webViewClient = webClient
                         webChromeClient = chromeClient
+                        installWebPlayerBootstrap(this)
                         webView = this
                         DiagnosticsLog.event("EmbedWebView factory complete userAgent=${settings.userAgentString.take(100)}")
                     }
@@ -726,7 +736,7 @@ fun EmbedWebView(
             },
             onDoubleTap = {
                 DiagnosticsLog.event("EmbedWebView double tap playPause")
-                webView?.evaluateJavascript(REMOTE_TOGGLE_PLAYBACK_JS, null)
+                webView?.let { dispatchWebPlayerCommand(it, "toggle", fallbackScript = REMOTE_TOGGLE_PLAYBACK_JS) }
                 webIsPlaying = !webIsPlaying
                 playbackGestureIsPlaying = webIsPlaying
             },
@@ -745,24 +755,16 @@ fun EmbedWebView(
             },
         )
 
-        // The same starvation for servers we cannot script: web players only raise their chrome on
-        // interaction, so swallowing taps is what keeps the provider's bar down and leaves ours the
-        // only one on screen. A tap while our bar is already up is handed to the page instead —
-        // that summons the provider's controls, the sole way to scrub on these servers, and the
-        // screen stays theirs until the pass-through window closes.
-        if (fallbackControlsActive && !providerControlsMode) Box(
+        // Older WebViews without document-start frame injection cannot expose cross-origin video
+        // state. They still never receive pointer input: taps only reveal/hide our fallback row, so
+        // provider controls and tap-hijack ads stay inaccessible.
+        if (fallbackControlsActive) Box(
             Modifier
                 .fillMaxSize()
                 .pointerInput(url) {
-                    detectTapGestures { offset ->
-                        if (fallbackControlsVisible) {
-                            fallbackControlsVisible = false
-                            providerControlsMode = true
-                            dispatchWebTap(webView, offset.x, offset.y)
-                        } else {
-                            fallbackControlsVisible = true
-                            fallbackInteraction++
-                        }
+                    detectTapGestures {
+                        fallbackControlsVisible = !fallbackControlsVisible
+                        fallbackInteraction++
                     }
                 },
         )
@@ -781,7 +783,7 @@ fun EmbedWebView(
                 },
                 onPlayPause = {
                     DiagnosticsLog.event("EmbedWebView touch control playPause")
-                    webView?.evaluateJavascript(REMOTE_TOGGLE_PLAYBACK_JS, null)
+                    webView?.let { dispatchWebPlayerCommand(it, "toggle", fallbackScript = REMOTE_TOGGLE_PLAYBACK_JS) }
                     webIsPlaying = !webIsPlaying
                     touchControlsInteraction++
                 },
@@ -834,9 +836,9 @@ fun EmbedWebView(
             )
         }
 
-        // One bar for the servers our JS cannot reach, sitting where a player's controls belong:
-        // episode moves and play/pause on the left, settings and fullscreen on the right. There is
-        // no position or duration to build a scrubber from, so seeking stays the provider's.
+        // Reduced native bar for old WebView builds that cannot report cross-origin position or
+        // duration. Provider controls remain suppressed, so seeking is unavailable in this rare
+        // compatibility mode instead of exposing the page UI.
         if (fallbackControlsActive && fallbackControlsVisible) Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -860,10 +862,9 @@ fun EmbedWebView(
                     if (fallbackIsPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                     onClick = {
                         DiagnosticsLog.event("EmbedWebView fallback playPause")
-                        // Nothing scripted reaches this player, but a touch does, so press the
-                        // picture where a finger would. Dead centre is where providers park their
-                        // own next-episode overlay, hence the aim above it.
-                        dispatchWebTapAt(webView, 0.5f, 0.32f)
+                        webView?.let {
+                            dispatchWebPlayerCommand(it, "toggle", fallbackScript = REMOTE_TOGGLE_PLAYBACK_JS)
+                        }
                         fallbackIsPlaying = !fallbackIsPlaying
                         fallbackInteraction++
                     },
@@ -910,7 +911,7 @@ fun EmbedWebView(
                 onRewind = { seekWebVideo(webView, (positionMs - 10_000L).coerceAtLeast(0L)) },
                 onPlayPause = {
                     DiagnosticsLog.event("EmbedWebView TV control playPause")
-                    webView?.evaluateJavascript(REMOTE_TOGGLE_PLAYBACK_JS, null)
+                    webView?.let { dispatchWebPlayerCommand(it, "toggle", fallbackScript = REMOTE_TOGGLE_PLAYBACK_JS) }
                     webIsPlaying = !webIsPlaying
                 },
                 onForward = { seekWebVideo(webView, positionMs + 10_000L) },
@@ -1015,9 +1016,8 @@ private fun WebSkipButton(label: String, onClick: () -> Unit, modifier: Modifier
 }
 
 /**
- * Every web player ultimately drives an HTML5 <video>. Poll it (and any same-origin iframe's)
- * every second while playing and report position/duration to the Kotlin bridge. Cross-origin
- * iframes are unreachable by design — those hosts simply won't report progress.
+ * Legacy main-frame fallback for WebViews without document-start injection. Current WebViews use
+ * the all-frame poll installed by [HIDE_PROVIDER_CHROME_JS].
  */
 private val PROGRESS_POLL_JS = """
     (function() {
@@ -1170,32 +1170,268 @@ private val START_PLAYBACK_JS = """
 """.trimIndent()
 
 /**
- * Drops the provider's own control bar so ours is the only one on screen. Scoped to Plyr, which is
- * what the embeds we can drive actually run (verified on Kwik); an unrecognised player keeps its
- * chrome rather than being blanked by a guess. A stylesheet rule beats Plyr's own class toggling.
+ * Removes embed-player chrome while leaving video and captions intact. The script is installed at
+ * document start in every frame, so it reaches cross-origin Kiwi/Kwik iframes that a later
+ * [WebView.evaluateJavascript] call cannot access. The observer makes the suppression survive SPA
+ * rerenders and players that recreate their controls after playback begins.
  */
-private val HIDE_PROVIDER_CHROME_JS = """
+internal val HIDE_PROVIDER_CHROME_JS = """
     (function() {
-      var css = '.plyr__controls{display:none !important;}';
-      function apply(root) {
-        if (!root || root.getElementById('anili-hide-chrome')) return;
-        var head = root.head || root.documentElement;
-        if (!head) return;
-        var style = root.createElement('style');
-        style.id = 'anili-hide-chrome';
-        style.appendChild(root.createTextNode(css));
-        head.appendChild(style);
+      if (window.__aniliChromeSuppressionInstalled) return;
+      window.__aniliChromeSuppressionInstalled = true;
+
+      var styleId = 'anili-hide-provider-chrome';
+      var css = [
+        '.plyr__controls',
+        '.plyr__control--overlaid',
+        '.plyr__menu__container',
+        '.vjs-control-bar',
+        '.vjs-big-play-button',
+        '.jw-controlbar',
+        '.jw-display-controls',
+        '.jw-title',
+        '.jw-logo',
+        '.art-controls',
+        '.art-center',
+        '.art-mask',
+        '.art-contextmenus',
+        '.media-control',
+        '.play-wrapper',
+        '.fluid_controls_container',
+        '.fluid_initial_play_button',
+        '.mejs__controls',
+        '.mejs__overlay-play',
+        '.shaka-controls-container',
+        '.dplayer-controller',
+        '.dplayer-mobile-play',
+        '.dplayer-menu',
+        '.dplayer-logo',
+        '.xgplayer-controls',
+        '.xgplayer-start',
+        '.fp-controls',
+        '.fp-play',
+        '.playkit-control-bar',
+        '.playkit-pre-playback-play-button',
+        '.playkit-overlay-button',
+        '.op-controls',
+        '.op-player__play',
+        '[data-media-controls]',
+        '[data-media-button]',
+        'media-controls',
+        'media-play-button',
+        '.back-button',
+        '.back-btn',
+        '.backButton',
+        '.player-back',
+        '.player__back',
+        '.plyr__back',
+        '.vjs-back-button',
+        '.jw-back-button',
+        '.art-back',
+        'button[aria-label="Back" i]',
+        'button[title="Back" i]',
+        '[data-testid="back-button"]',
+        '[data-testid="player-back"]',
+        '[class~="player-controls"]',
+        '[class~="player-control-bar"]',
+        '[class~="controls-container"]',
+        '[class~="big-play-button"]',
+        '[class~="center-play-button"]',
+        'html.anili-video-document button',
+        'html.anili-video-document [role="button"]',
+        'html.anili-video-document [role="slider"]',
+        'html.anili-video-document input[type="button"]',
+        'html.anili-video-document input[type="range"]',
+        'html.anili-video-document select',
+        'html.anili-video-document a[aria-label]'
+      ].join(',') +
+        '{display:none!important;opacity:0!important;visibility:hidden!important;' +
+        'pointer-events:none!important;}';
+      css += 'video::-webkit-media-controls{display:none!important;}';
+      css += 'video::-webkit-media-controls-enclosure{display:none!important;}';
+      css += 'video::-webkit-media-controls-panel{display:none!important;}';
+
+      function installStyle() {
+        var parent = document.head || document.documentElement;
+        if (!parent) return;
+        var style = document.getElementById(styleId);
+        if (!style) {
+          style = document.createElement('style');
+          style.id = styleId;
+          parent.appendChild(style);
+        }
+        if (style.textContent !== css) style.textContent = css;
       }
-      try {
-        apply(document);
+
+      function suppressNativeControls(root) {
+        if (!root) return;
+        var videos = [];
+        if (root.matches && root.matches('video')) videos.push(root);
+        if (root.querySelectorAll) {
+          var descendants = root.querySelectorAll('video');
+          for (var i = 0; i < descendants.length; i++) videos.push(descendants[i]);
+        }
+        for (var j = 0; j < videos.length; j++) {
+          var video = videos[j];
+          video.controls = false;
+          video.removeAttribute('controls');
+          video.setAttribute('controlsList', 'nodownload nofullscreen noremoteplayback');
+          try { video.disablePictureInPicture = true; } catch (e) { /* optional */ }
+        }
+        if (videos.length && document.documentElement) {
+          document.documentElement.classList.add('anili-video-document');
+        }
+      }
+
+      function suppress(root) {
+        installStyle();
+        suppressNativeControls(root || document);
+      }
+
+      function findVideo() {
+        var videos = document.querySelectorAll('video');
+        var best = null;
+        var bestScore = -1;
+        for (var i = 0; i < videos.length; i++) {
+          var video = videos[i];
+          var rect = video.getBoundingClientRect();
+          var score = Math.max(0, rect.width) * Math.max(0, rect.height);
+          if (!video.paused) score += 1000000000;
+          if (isFinite(video.duration) && video.duration > 60) score += 100000000;
+          if (score > bestScore) { best = video; bestScore = score; }
+        }
+        return best;
+      }
+
+      function play(video) {
+        if (!video) return false;
+        var result = video.play();
+        if (result && result.catch) result.catch(function() {});
+        return true;
+      }
+
+      function applyCommand(data) {
+        if (!data || data.__aniliPlayerCommand !== 'v1') return false;
+        var video = findVideo();
+        if (!video) return false;
+        var value = Number(data.value);
+        try {
+          switch (data.command) {
+            case 'play': return play(video);
+            case 'pause': video.pause(); return true;
+            case 'toggle': if (video.paused) play(video); else video.pause(); return true;
+            case 'seek':
+              if (!isFinite(value)) return false;
+              video.currentTime = isFinite(video.duration) && video.duration > 0
+                ? Math.min(Math.max(0, value), video.duration)
+                : Math.max(0, value);
+              return true;
+            case 'resumeAt':
+              if (!isFinite(value)) return false;
+              video.currentTime = isFinite(video.duration) && video.duration > 0
+                ? Math.min(Math.max(0, value), video.duration)
+                : Math.max(0, value);
+              return play(video);
+            case 'speed':
+              if (!isFinite(value) || value <= 0) return false;
+              video.defaultPlaybackRate = value;
+              video.playbackRate = value;
+              return true;
+            case 'volume':
+              if (!isFinite(value)) return false;
+              video.volume = Math.min(1, Math.max(0, value));
+              video.muted = video.volume <= 0;
+              return true;
+          }
+        } catch (e) { /* best effort */ }
+        return false;
+      }
+
+      function forwardCommand(data) {
         var frames = document.querySelectorAll('iframe');
         for (var i = 0; i < frames.length; i++) {
-          try { if (frames[i].contentDocument) apply(frames[i].contentDocument); }
-          catch (e) { /* cross-origin */ }
+          try { frames[i].contentWindow.postMessage(data, '*'); } catch (e) { /* detached */ }
         }
-      } catch (e) { /* best effort */ }
+      }
+
+      window.__aniliDispatchPlayerCommand = function(command, value) {
+        var data = { __aniliPlayerCommand: 'v1', command: command, value: value };
+        applyCommand(data);
+        forwardCommand(data);
+        return true;
+      };
+      window.addEventListener('message', function(event) {
+        var data = event.data;
+        if (!data || data.__aniliPlayerCommand !== 'v1') return;
+        applyCommand(data);
+        forwardCommand(data);
+      }, true);
+
+      function observe() {
+        if (!document.documentElement) {
+          setTimeout(observe, 0);
+          return;
+        }
+        suppress(document);
+        new MutationObserver(function(mutations) {
+          installStyle();
+          for (var i = 0; i < mutations.length; i++) {
+            var mutation = mutations[i];
+            if (mutation.type === 'attributes') suppressNativeControls(mutation.target);
+            for (var j = 0; j < mutation.addedNodes.length; j++) {
+              suppressNativeControls(mutation.addedNodes[j]);
+            }
+          }
+        }).observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['controls']
+        });
+      }
+
+      try { observe(); } catch (e) { /* best effort */ }
+
+      // This bootstrap runs independently in every origin-matched frame. The Android JavaScript
+      // bridge is exposed to those frames too, so a deeply nested cross-origin video can activate
+      // the same native controls and progress UI as a top-level player.
+      if (!window.__aniliProgressHooked) {
+        window.__aniliProgressHooked = true;
+        setInterval(function() {
+          try {
+            var video = findVideo();
+            if (video && !window.__aniliVideoReported) {
+              window.__aniliVideoReported = true;
+              AniliProgress.onVideoAvailable();
+            }
+            if (video && isFinite(video.duration) && video.duration > 0 && video.currentTime >= 0) {
+              AniliProgress.onTick(video.currentTime, video.duration, !video.paused, video.muted, video.volume);
+            }
+          } catch (e) { /* bridge detached or not available on an old WebView */ }
+        }, 1000);
+      }
     })();
 """.trimIndent()
+
+internal val PROVIDER_CHROME_ORIGIN_RULES = setOf("*")
+
+private fun installWebPlayerBootstrap(webView: WebView) {
+    if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+        DiagnosticsLog.event("EmbedWebView document-start injection unavailable; using main-frame fallback")
+        return
+    }
+    runCatching {
+        WebViewCompat.addDocumentStartJavaScript(
+            webView,
+            HIDE_PROVIDER_CHROME_JS,
+            PROVIDER_CHROME_ORIGIN_RULES,
+        )
+    }.onSuccess {
+        DiagnosticsLog.event("EmbedWebView native-control bootstrap installed for all frames")
+    }.onFailure {
+        DiagnosticsLog.throwable("EmbedWebView provider chrome suppression install failed", it)
+    }
+}
 
 private val REMOTE_TOGGLE_PLAYBACK_JS = """
     (function() {
@@ -1255,13 +1491,35 @@ private fun RESUME_WHEN_READY_JS(targetSec: Double): String = """
 
 private fun seekWebVideo(webView: WebView?, targetMs: Long?) {
     val targetSec = targetMs?.div(1000.0) ?: return
-    runCatching { webView?.evaluateJavascript(SEEK_VIDEO_JS(targetSec), null) }
+    webView?.let { dispatchWebPlayerCommand(it, "seek", targetSec, SEEK_VIDEO_JS(targetSec)) }
 }
 
 private fun setWebVolume(webView: WebView?, volume: Float, onChanged: (Float) -> Unit) {
+    val target = volume.coerceIn(0f, 1f)
+    webView?.let {
+        dispatchWebPlayerCommand(it, "volume", target.toDouble(), WEB_VOLUME_JS(delta = null, absolute = target))
+    }
+    onChanged(target)
+}
+
+internal fun webPlayerCommandJs(command: String, value: Double? = null): String {
+    require(command.matches(Regex("[A-Za-z]+"))) { "Invalid web player command" }
+    val jsValue = value?.takeIf(Double::isFinite)?.toString() ?: "null"
+    return "(function(){try{return window.__aniliDispatchPlayerCommand" +
+        "?window.__aniliDispatchPlayerCommand('$command',$jsValue):false;}catch(e){return false;}})();"
+}
+
+private fun dispatchWebPlayerCommand(
+    webView: WebView,
+    command: String,
+    value: Double? = null,
+    fallbackScript: String? = null,
+) {
     runCatching {
-        webView?.evaluateJavascript(WEB_VOLUME_JS(delta = null, absolute = volume)) { result ->
-            result.toFloatOrNull()?.coerceIn(0f, 1f)?.let(onChanged)
+        webView.evaluateJavascript(webPlayerCommandJs(command, value)) { handled ->
+            if (handled != "true" && fallbackScript != null) {
+                runCatching { webView.evaluateJavascript(fallbackScript, null) }
+            }
         }
     }
 }
@@ -1347,34 +1605,9 @@ private fun applyDeviceVolume(audioManager: android.media.AudioManager?, value: 
     )
 }
 
-/**
- * Presses the page the way a finger would. A cross-origin embed refuses every scripted route into
- * its player, but a real touch on the WebView reaches whatever sits under it, iframe or not — so
- * this is how the app's own bar relays play/pause, and how it hands a tap back to the provider.
- */
-private fun dispatchWebTap(webView: WebView?, x: Float, y: Float) {
-    val web = webView ?: return
-    val downAt = SystemClock.uptimeMillis()
-    val down = MotionEvent.obtain(downAt, downAt, MotionEvent.ACTION_DOWN, x, y, 0)
-    val up = MotionEvent.obtain(downAt, downAt + 48L, MotionEvent.ACTION_UP, x, y, 0)
-    runCatching {
-        web.dispatchTouchEvent(down)
-        web.dispatchTouchEvent(up)
-    }
-    down.recycle()
-    up.recycle()
-}
-
-/** [dispatchWebTap] aimed at a fraction of the view's own box, for callers without pixels. */
-private fun dispatchWebTapAt(webView: WebView?, xFraction: Float, yFraction: Float) {
-    val web = webView ?: return
-    if (web.width <= 0 || web.height <= 0) return
-    dispatchWebTap(web, web.width * xFraction, web.height * yFraction)
-}
-
 private fun stopWebPlayback(webView: WebView) {
     DiagnosticsLog.event("EmbedWebView stop playback url=${webView.url ?: "none"}")
-    runCatching { webView.evaluateJavascript(PAUSE_VIDEO_JS, null) }
+    dispatchWebPlayerCommand(webView, "pause", fallbackScript = PAUSE_VIDEO_JS)
     webView.onPause()
     webView.pauseTimers()
     webView.stopLoading()
