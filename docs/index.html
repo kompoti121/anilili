@@ -69,6 +69,7 @@ h1 {
   max-width: 560px; margin: 20px auto 0; color: var(--ink-dim); font-size: 18.5px;
   animation: rise .7s .16s cubic-bezier(.2,.7,.2,1) both;
 }
+@media (max-width: 560px) { .hero-sub br { display: none; } }
 .hero-cta {
   display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 38px;
   animation: rise .7s .24s cubic-bezier(.2,.7,.2,1) both;
@@ -188,7 +189,7 @@ footer { border-top: 1px solid var(--line); padding: 40px 0 56px; text-align: ce
   <header class="hero wrap">
     <div class="hero-logo" role="img" aria-label="Anilili logo"></div>
     <h1>Anilili</h1>
-    <p class="hero-sub">Native anime streaming for Android, Android TV &amp; Fire TV. No browser wrapper — a real app, free forever.</p>
+    <p class="hero-sub">Native anime streaming for Android, Android TV &amp; Fire TV.<br />No browser wrapper — a real app, free forever.</p>
     <div class="hero-cta">
       <a class="btn btn-dl" href="https://github.com/kompoti121/anilili/releases/latest/download/anilili.apk">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.55l3.3-3.3 1.4 1.42L12 16.4l-4.7-4.72 1.4-1.42 3.3 3.3V3h2zM5 19h14v2H5v-2z"/></svg>
