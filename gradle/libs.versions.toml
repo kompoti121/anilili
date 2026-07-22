@@ -7,17 +7,23 @@ lifecycle = "2.8.7"
 activityCompose = "1.9.3"
 composeBom = "2024.12.01"
 navigation = "2.8.5"
-media3 = "1.10.1"
+# 1.9+ raises minSdk to 23. Keep the last API-22-compatible line for Fire OS 5.
+media3 = "1.8.1"
 playServicesCronet = "18.0.1"
 fragment = "1.8.5"
 okhttp = "4.12.0"
+okio = "3.9.1"
 serialization = "1.7.3"
 coil = "2.7.0"
-room = "2.8.4"
-datastore = "1.2.1"
-work = "2.11.2"
+# 2.8+ requires API 23; 2.7.2 retains API 21 support.
+room = "2.7.2"
+# 1.2+ requires API 23; 1.1.7 retains API 21 support.
+datastore = "1.1.7"
+# 2.11+ requires API 23; 2.10.5 retains API 21 support.
+work = "2.10.5"
 appcompat = "1.7.0"
-webkit = "1.16.0"
+# 1.15+ drops API 22; 1.14 is the final WebKit line supporting Fire OS 5.
+webkit = "1.14.0"
 junit = "4.13.2"
 zxing = "3.5.3"
 
@@ -48,6 +54,7 @@ androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version
 androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
+okio = { group = "com.squareup.okio", name = "okio", version.ref = "okio" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }

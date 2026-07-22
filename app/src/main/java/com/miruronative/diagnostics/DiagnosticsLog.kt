@@ -150,7 +150,11 @@ object DiagnosticsLog {
     }
 
     fun webViewPackage(label: String) {
-        val pkg = runCatching { WebView.getCurrentWebViewPackage() }.getOrNull()
+        val pkg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            runCatching { WebView.getCurrentWebViewPackage() }.getOrNull()
+        } else {
+            null
+        }
         event(
             "$label webviewPackage=" +
                 if (pkg == null) "none" else "${pkg.packageName}/${pkg.versionName} (${pkg.longVersionCodeCompat()})",

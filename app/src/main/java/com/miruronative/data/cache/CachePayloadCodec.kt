@@ -1,8 +1,8 @@
 package com.miruronative.data.cache
 
+import com.miruronative.util.Base64Compat
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.util.Base64
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 
@@ -20,13 +20,13 @@ internal object CachePayloadCodec {
             GZIPOutputStream(output).use { it.write(bytes) }
             output.toByteArray()
         }
-        return GZIP_PREFIX + Base64.getEncoder().encodeToString(compressed)
+        return GZIP_PREFIX + Base64Compat.encode(compressed)
     }
 
     fun decode(stored: String): String {
         if (!stored.startsWith(GZIP_PREFIX)) return stored
 
-        val compressed = Base64.getDecoder().decode(stored.removePrefix(GZIP_PREFIX))
+        val compressed = Base64Compat.decode(stored.removePrefix(GZIP_PREFIX))
         return GZIPInputStream(ByteArrayInputStream(compressed)).bufferedReader(Charsets.UTF_8).use { it.readText() }
     }
 

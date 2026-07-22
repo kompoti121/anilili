@@ -3,6 +3,7 @@ package com.miruronative.ui.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -55,6 +56,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -89,6 +91,8 @@ import com.miruronative.ui.components.LocalAppChromeBottomInset
 import com.miruronative.ui.components.PullRefreshContainer
 import com.miruronative.ui.components.ScrollAwareTopBar
 import kotlinx.coroutines.delay
+
+private const val HERO_AUTO_ADVANCE_MS = 7_000L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -377,7 +381,9 @@ private fun HeroPager(
     val pagerState = rememberPagerState(pageCount = { items.size })
     val heroIds = items.map(Media::id)
     var tvPage by remember(heroIds) { mutableIntStateOf(0) }
+    var tvHeroHasFocus by remember(heroIds) { mutableStateOf(false) }
     val safeTvPage = tvPage.coerceIn(0, items.lastIndex)
+    val pagerIsDragged by pagerState.interactionSource.collectIsDraggedAsState()
     val focusRequesters = remember(heroIds) {
         List(items.size) { HeroFocusRequesters(FocusRequester(), FocusRequester()) }
     }
@@ -387,6 +393,19 @@ private fun HeroPager(
         device.isExpanded -> 360.dp
         device.isTablet -> 320.dp
         else -> 270.dp
+    }
+    if (device.isTv) {
+        LaunchedEffect(heroIds, safeTvPage, tvHeroHasFocus) {
+            if (items.size <= 1 || tvHeroHasFocus) return@LaunchedEffect
+            delay(HERO_AUTO_ADVANCE_MS)
+            tvPage = nextHeroPage(safeTvPage, items.size)
+        }
+    } else {
+        LaunchedEffect(heroIds, pagerState.settledPage, pagerIsDragged) {
+            if (items.size <= 1 || pagerIsDragged) return@LaunchedEffect
+            delay(HERO_AUTO_ADVANCE_MS)
+            pagerState.animateScrollToPage(nextHeroPage(pagerState.settledPage, items.size))
+        }
     }
     Box(
         Modifier
@@ -409,6 +428,7 @@ private fun HeroPager(
                 onPrevious = { tvPage = (page - 1).coerceAtLeast(0) },
                 onNext = { tvPage = (page + 1).coerceAtMost(items.lastIndex) },
                 onMoveDown = onMoveDown,
+                onFocusChanged = { tvHeroHasFocus = it },
             )
         } else {
             HorizontalPager(
@@ -468,6 +488,7 @@ private fun HeroCard(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onMoveDown: (() -> Boolean)?,
+    onFocusChanged: (Boolean) -> Unit = {},
 ) {
     val device = LocalAppDeviceProfile.current
     val context = LocalContext.current
@@ -518,6 +539,7 @@ private fun HeroCard(
                     colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
                     modifier = Modifier
                         .focusRequester(playFocusRequester)
+                        .onFocusChanged { if (device.isTv) onFocusChanged(it.isFocused) }
                         .onPreviewKeyEvent { event ->
                             if (device.isTv && event.type == KeyEventType.KeyDown) {
                                 when (event.key) {
@@ -550,6 +572,7 @@ private fun HeroCard(
                     onClick = { onAnimeClick(media.id) },
                     modifier = Modifier
                         .focusRequester(detailsFocusRequester)
+                        .onFocusChanged { if (device.isTv) onFocusChanged(it.isFocused) }
                         .onPreviewKeyEvent { event ->
                             if (device.isTv && event.type == KeyEventType.KeyDown) {
                                 when (event.key) {
@@ -587,6 +610,9 @@ private data class HeroFocusRequesters(
     val play: FocusRequester,
     val details: FocusRequester,
 )
+
+internal fun nextHeroPage(currentPage: Int, pageCount: Int): Int =
+    if (pageCount <= 1) 0 else (currentPage.coerceIn(0, pageCount - 1) + 1) % pageCount
 
 @Composable
 private fun MediaRail(title: String, media: List<Media>, onAnimeClick: (Int) -> Unit, cardWidth: Dp) {

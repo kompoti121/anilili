@@ -76,7 +76,10 @@ On Windows, use:
 gradlew.bat assembleDebug
 ```
 
-The debug APK is generated at `app/build/outputs/apk/debug/app-debug.apk`.
+Debug builds generate three APKs in `app/build/outputs/apk/debug/`: `anilili-debug.apk`
+(universal), `anilili-debug-arm64-v8a.apk`, and `anilili-debug-armeabi-v7a.apk`.
+Release builds use the same three-way layout without the `-debug` suffix. The universal release
+keeps the update-compatible name `anilili.apk`. All three support Android/Fire OS API 22 and up.
 
 ## Notes
 

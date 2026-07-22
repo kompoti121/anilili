@@ -3,6 +3,7 @@ package com.miruronative.data.update
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import com.miruronative.BuildConfig
@@ -111,7 +112,7 @@ object UpdateManager {
      */
     fun install(context: Context) {
         val ready = _state.value as? State.ReadyToInstall ?: return
-        if (!context.packageManager.canRequestPackageInstalls()) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
             // Some TV builds don't resolve the per-app screen; fall back to the general list.
             val perApp = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -154,10 +155,17 @@ object UpdateManager {
             val tag = release["tag_name"]?.jsonPrimitive?.content.orEmpty()
             val body = release["body"]?.jsonPrimitive?.content.orEmpty()
             val version = parseVersion(name) ?: parseVersion(tag) ?: parseVersion(body) ?: return null
-            val apk = release["assets"]?.jsonArray
+            val apks = release["assets"]?.jsonArray
                 ?.map { it.jsonObject }
-                ?.firstOrNull { it["name"]?.jsonPrimitive?.content.orEmpty().endsWith(".apk") }
-                ?: return null
+                ?.filter { it["name"]?.jsonPrimitive?.content.orEmpty().endsWith(".apk", ignoreCase = true) }
+                .orEmpty()
+            val preferredName = preferredReleaseApkName(
+                apks.map { it["name"]?.jsonPrimitive?.content.orEmpty() },
+                Build.SUPPORTED_ABIS.toList(),
+            ) ?: return null
+            val apk = apks.firstOrNull {
+                it["name"]?.jsonPrimitive?.content.orEmpty() == preferredName
+            } ?: return null
             return UpdateInfo(
                 version = version,
                 changelog = body,
@@ -213,4 +221,20 @@ object UpdateManager {
         }
         return false
     }
+}
+
+/** Chooses the smallest compatible split while retaining the universal APK as a safe fallback. */
+internal fun preferredReleaseApkName(names: List<String>, supportedAbis: List<String>): String? {
+    val apks = names.filter { it.endsWith(".apk", ignoreCase = true) }
+    if (apks.isEmpty()) return null
+    val preferredAbi = when {
+        supportedAbis.any { it.equals("arm64-v8a", ignoreCase = true) } -> "arm64-v8a"
+        supportedAbis.any { it.equals("armeabi-v7a", ignoreCase = true) } -> "armeabi-v7a"
+        else -> null
+    }
+    return preferredAbi?.let { abi ->
+        apks.firstOrNull { it.contains(abi, ignoreCase = true) }
+    } ?: apks.firstOrNull { it.equals("anilili.apk", ignoreCase = true) }
+        ?: apks.firstOrNull { it.contains("universal", ignoreCase = true) }
+        ?: apks.first()
 }

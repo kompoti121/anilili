@@ -68,22 +68,16 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import android.content.Context
 import android.view.ContextThemeWrapper
-import android.view.LayoutInflater
-import android.view.ViewGroup
-import androidx.media3.common.ViewProvider
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.cast.MediaRouteButtonFactory
 import androidx.mediarouter.app.MediaRouteButton
 import androidx.mediarouter.media.MediaRouter
 import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.CastButtonFactory
 import androidx.mediarouter.app.MediaRouteChooserDialog
 import androidx.mediarouter.app.MediaRouteChooserDialogFragment
 import androidx.mediarouter.app.MediaRouteControllerDialog
 import androidx.mediarouter.app.MediaRouteControllerDialogFragment
 import androidx.mediarouter.app.MediaRouteDialogFactory
-import com.google.common.util.concurrent.Futures
-import com.google.common.util.concurrent.ListenableFuture
-import com.google.common.util.concurrent.MoreExecutors
 import com.miruronative.R
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -111,27 +105,6 @@ import com.miruronative.ui.components.CaptionAppearanceDialog
 import com.miruronative.ui.nav.Routes
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-
-/**
- * Same as media3's MediaRouteButtonViewProvider, but inflates the MediaRouteButton with an
- * AppCompat-derived theme. The activity keeps its framework theme, and MediaRouteButton (and the
- * route chooser/controller dialogs it opens) crash with "background can not be translucent: #0"
- * without AppCompat theme attributes — so both the button and its dialogs get a wrapped context.
- */
-@UnstableApi
-private class ThemedMediaRouteButtonViewProvider : ViewProvider {
-    override fun getView(parent: ViewGroup): ListenableFuture<View> {
-        val themedContext = ContextThemeWrapper(parent.context, R.style.Theme_MiruroNative_MediaRouter)
-        val button = LayoutInflater.from(themedContext)
-            .inflate(androidx.media3.cast.R.layout.media_route_button_view, parent, false) as MediaRouteButton
-        button.setDialogFactory(ThemedMediaRouteDialogFactory())
-        return Futures.transform(
-            MediaRouteButtonFactory.setUpMediaRouteButton(parent.context, button),
-            { button as View },
-            MoreExecutors.directExecutor(),
-        )
-    }
-}
 
 /**
  * The route chooser/controller dialog fragments create their dialogs from the hosting activity's
@@ -445,7 +418,6 @@ fun PlayerSurface(
     }
 
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
-    val mediaRouteButtonViewProvider = remember { ThemedMediaRouteButtonViewProvider() }
     var controllerVisible by remember { mutableStateOf(false) }
     var tvControlsVisible by remember { mutableStateOf(false) }
     var tvControlsInteraction by remember { mutableIntStateOf(0) }
@@ -686,7 +658,6 @@ fun PlayerSurface(
                 DiagnosticsLog.event("PlayerSurface AndroidView factory create PlayerView")
                 PlayerView(ctx).apply {
                     player = playerControls
-                    setMediaRouteButtonViewProvider(mediaRouteButtonViewProvider)
                     // Phone and TV both draw their own controls (Compose bar / TvPlayerControls),
                     // so Media3's built-in controller is off everywhere.
                     useController = false
@@ -733,9 +704,6 @@ fun PlayerSurface(
                 it.isFocusableInTouchMode = !device.isTv
                 if (device.isTv) it.clearFocus()
                 it.applyCaptionStyle(captionStyle)
-                // Deliberately NOT re-setting the media route button provider here: every
-                // setMediaRouteButtonViewProvider call inflates a fresh button, so repeated
-                // update passes stack duplicate cast icons. The factory sets it once.
                 it.bindUnifiedSettingsButton { settingsExpanded = true }
                 DiagnosticsLog.event(
                     "PlayerSurface AndroidView update controller=${controller != null} " +
@@ -774,21 +742,21 @@ fun PlayerSurface(
             )
         }
 
-        // Phone controls, hidden: tap shows the controls, horizontal drag seeks, vertical edge
-        // drags control brightness/volume, and double-tap toggles playback. (TV uses controls.)
-        if (controller != null && !device.isTv && !phoneControlsVisible) {
+        // Keep one stable gesture surface for both visible and hidden phone controls. Previously
+        // this handler was removed while the controls were showing and replaced by a single-tap
+        // scrim, so double-tap pause worked or failed depending on the overlay's current state.
+        // PlayerControlsScaffold is drawn above this surface, leaving its buttons clickable.
+        if (controller != null && !device.isTv) {
             PlayerGestureControls(
                 positionMs = positionMs,
                 durationMs = durationMs,
                 onTap = {
-                    phoneControlsVisible = true
+                    phoneControlsVisible = !phoneControlsVisible
                     phoneControlsInteraction++
                 },
                 onDoubleTap = {
                     val active = controller ?: return@PlayerGestureControls
-                    val willPlay = !active.isPlaying
-                    if (willPlay) active.play() else active.pause()
-                    playbackGestureIsPlaying = willPlay
+                    playbackGestureIsPlaying = togglePlayerPlayback(active)
                 },
                 onSeek = { target ->
                     controller?.seekTo(target)
@@ -806,14 +774,9 @@ fun PlayerSurface(
             )
         }
 
-        // Phone controls, shown: the shared control bar (identical to the embed player) over a
-        // full-screen scrim that hides it again on a tap in empty space.
+        // Phone controls, shown: the shared control bar (identical to the embed player). Empty
+        // video space is handled by the stable PlayerGestureControls surface underneath it.
         if (controller != null && !device.isTv && phoneControlsVisible) {
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .pointerInput(Unit) { detectTapGestures { phoneControlsVisible = false } },
-            )
             PlayerControlsScaffold(
                 isPlaying = playbackIsPlaying,
                 positionMs = positionMs,
@@ -826,7 +789,7 @@ fun PlayerSurface(
                     phoneControlsInteraction++
                 },
                 onPlayPause = {
-                    controller?.let { if (it.isPlaying) it.pause() else it.play() }
+                    controller?.let(::togglePlayerPlayback)
                     phoneControlsInteraction++
                 },
                 onForward = {
@@ -964,7 +927,7 @@ fun PlayerSurface(
                 },
                 onPlayPause = {
                     DiagnosticsLog.event("PlayerSurface TV control playPause")
-                    controller?.let { active -> if (active.isPlaying) active.pause() else active.play() }
+                    controller?.let(::togglePlayerPlayback)
                 },
                 onForward = {
                     DiagnosticsLog.event("PlayerSurface TV control forward")
@@ -1034,6 +997,18 @@ fun PlayerSurface(
     }
 }
 
+/**
+ * Toggle the requested playback intent, not only `isPlaying`. During buffering `isPlaying` is
+ * false even though playback is armed, which made a user's pause gesture call play again.
+ */
+private fun togglePlayerPlayback(controller: MediaController): Boolean {
+    val willPlay = playerToggleWillPlay(controller.playWhenReady)
+    if (willPlay) controller.play() else controller.pause()
+    return willPlay
+}
+
+internal fun playerToggleWillPlay(playWhenReady: Boolean): Boolean = !playWhenReady
+
 /** Quick subtitle on/off for the control bar's CC button; full track choice lives in the sheet. */
 @OptIn(UnstableApi::class)
 private fun toggleSubtitles(controller: MediaController, trackNameProvider: DefaultTrackNameProvider) {
@@ -1094,10 +1069,9 @@ private fun CastButton(modifier: Modifier = Modifier) {
             modifier = modifier,
             factory = { ctx ->
                 val themed = ContextThemeWrapper(ctx, R.style.Theme_MiruroNative_MediaRouter)
-                val button = LayoutInflater.from(themed)
-                    .inflate(androidx.media3.cast.R.layout.media_route_button_view, null, false) as MediaRouteButton
+                val button = MediaRouteButton(themed)
                 button.setDialogFactory(ThemedMediaRouteDialogFactory())
-                runCatching { MediaRouteButtonFactory.setUpMediaRouteButton(ctx, button) }
+                runCatching { CastButtonFactory.setUpMediaRouteButton(ctx, button) }
                 button
             },
         )

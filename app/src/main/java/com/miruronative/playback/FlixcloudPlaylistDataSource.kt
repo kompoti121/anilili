@@ -7,8 +7,8 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import com.miruronative.diagnostics.DiagnosticsLog
+import com.miruronative.util.Base64Compat
 import java.io.ByteArrayOutputStream
-import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
 
 @UnstableApi
@@ -106,9 +106,9 @@ internal fun decodeFlixcloudPlaylist(payload: ByteArray, keyBase64: String): Byt
     val encoded = payload.toString(Charsets.UTF_8).trim()
     if (encoded.startsWith("#EXTM3U")) return null
     return runCatching {
-        val key = Base64.getDecoder().decode(keyBase64)
+        val key = Base64Compat.decode(keyBase64)
         require(key.isNotEmpty())
-        val encrypted = Base64.getDecoder().decode(encoded)
+        val encrypted = Base64Compat.decode(encoded)
         ByteArray(encrypted.size) { index ->
             (encrypted[index].toInt() xor key[index % key.size].toInt()).toByte()
         }.takeIf { it.toString(Charsets.UTF_8).startsWith("#EXTM3U") }

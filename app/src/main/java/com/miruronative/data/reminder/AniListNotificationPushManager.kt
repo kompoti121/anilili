@@ -81,10 +81,16 @@ object AniListNotificationPushManager {
      * so the shade never shows entries the app already considers handled.
      */
     fun dismissAll(context: Context) {
-        val manager = context.applicationContext.getSystemService(NotificationManager::class.java) ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val manager = notificationManager(context)
         runCatching {
-            manager.activeNotifications
-                .filter { it.notification.channelId == CHANNEL_ID }
+            val active = manager.activeNotifications
+            val matching = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                active.filter { it.notification.channelId == CHANNEL_ID }
+            } else {
+                active.toList()
+            }
+            matching
                 .forEach { manager.cancel(it.id) }
         }
     }
@@ -119,8 +125,7 @@ object AniListNotificationPushManager {
             .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
-        context.getSystemService(NotificationManager::class.java)
-            .notify(item.id, notification)
+        notificationManager(context).notify(item.id, notification)
     }
 
     /** Without a summary, Android never collapses the group — each push stays a separate row. */
@@ -143,7 +148,7 @@ object AniListNotificationPushManager {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_EVENT)
             .build()
-        context.getSystemService(NotificationManager::class.java).notify(SUMMARY_ID, summary)
+        notificationManager(context).notify(SUMMARY_ID, summary)
     }
 
     private const val SUMMARY_ID = -1001
@@ -155,12 +160,17 @@ object AniListNotificationPushManager {
     }
 
     private fun createChannel(context: Context) {
-        context.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "AniList notifications", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Pushes unread notifications from your AniList account"
-            },
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notificationManager(context).createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "AniList notifications", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "Pushes unread notifications from your AniList account"
+                },
+            )
+        }
     }
+
+    private fun notificationManager(context: Context): NotificationManager =
+        context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     private fun readDelivered(context: Context): List<Int> {
         val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

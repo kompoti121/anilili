@@ -76,7 +76,7 @@ object ReminderManager {
     private fun cancel(item: AiringSchedule) {
         val record = records.firstOrNull { it.id == id(item) } ?: return
         alarmPendingIntent(record, PendingIntent.FLAG_NO_CREATE)?.let { pending ->
-            context.getSystemService(AlarmManager::class.java).cancel(pending)
+            alarmManager().cancel(pending)
             pending.cancel()
         }
         update(records.filterNot { it.id == record.id })
@@ -86,8 +86,12 @@ object ReminderManager {
         val pending = alarmPendingIntent(record, PendingIntent.FLAG_UPDATE_CURRENT) ?: return
         val desired = record.airingAt * 1000L - 10 * 60 * 1000L
         val triggerAt = desired.coerceAtLeast(System.currentTimeMillis() + 1_000L)
-        context.getSystemService(AlarmManager::class.java)
-            .setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+        val manager = alarmManager()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+        } else {
+            manager.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+        }
     }
 
     private fun alarmPendingIntent(record: ScheduledReminder, mode: Int): PendingIntent? {
@@ -105,12 +109,20 @@ object ReminderManager {
     }
 
     private fun createChannel() {
-        context.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "New episode reminders", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "Alerts shortly before a saved anime episode airs"
-            },
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notificationManager().createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "New episode reminders", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "Alerts shortly before a saved anime episode airs"
+                },
+            )
+        }
     }
+
+    private fun alarmManager(): AlarmManager =
+        context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+    private fun notificationManager(): NotificationManager =
+        context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     private fun update(value: List<ScheduledReminder>) {
         records = value
@@ -168,7 +180,7 @@ class AiringReminderReceiver : BroadcastReceiver() {
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
-        context.getSystemService(NotificationManager::class.java)
+        (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
             .notify(31 * mediaId + episode, notification)
     }
 }

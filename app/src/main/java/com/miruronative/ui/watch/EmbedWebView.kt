@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.net.Uri
 import android.os.Handler
+import android.os.Build
 import android.os.Looper
 import android.view.KeyEvent
 import android.view.View
@@ -392,6 +393,7 @@ fun EmbedWebView(
                 }
             }
 
+            @android.annotation.TargetApi(Build.VERSION_CODES.M)
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                 if (request?.isForMainFrame == true) {
                     val message = error?.description?.toString() ?: "The server did not respond"
@@ -420,6 +422,7 @@ fun EmbedWebView(
                 }
             }
 
+            @android.annotation.TargetApi(Build.VERSION_CODES.O)
             override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
                 DiagnosticsLog.event(
                     "EmbedWebView render process gone didCrash=${detail?.didCrash()} " +

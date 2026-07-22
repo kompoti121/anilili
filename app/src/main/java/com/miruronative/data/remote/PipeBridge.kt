@@ -120,6 +120,7 @@ object PipeBridge {
                 }
             }
 
+            @android.annotation.TargetApi(android.os.Build.VERSION_CODES.M)
             override fun onReceivedError(
                 view: WebView?,
                 request: WebResourceRequest?,
@@ -141,6 +142,7 @@ object PipeBridge {
                 }
             }
 
+            @android.annotation.TargetApi(android.os.Build.VERSION_CODES.O)
             override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
                 DiagnosticsLog.event(
                     "PipeBridge render process gone didCrash=${detail?.didCrash()} " +

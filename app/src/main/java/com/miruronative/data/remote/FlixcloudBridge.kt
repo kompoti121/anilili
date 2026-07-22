@@ -97,6 +97,7 @@ object FlixcloudBridge {
                 return null
             }
 
+            @android.annotation.TargetApi(android.os.Build.VERSION_CODES.M)
             override fun onReceivedError(
                 view: WebView?,
                 request: WebResourceRequest?,
@@ -107,6 +108,7 @@ object FlixcloudBridge {
                 }
             }
 
+            @android.annotation.TargetApi(android.os.Build.VERSION_CODES.O)
             override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
                 DiagnosticsLog.event("$TAG render process gone didCrash=${detail?.didCrash()}")
                 complete(activeId, null, "render_gone")

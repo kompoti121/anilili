@@ -1,4 +1,5 @@
 import java.util.Properties
+import com.android.build.OutputFile
 
 plugins {
     alias(libs.plugins.android.application)
@@ -20,10 +21,11 @@ android {
 
     defaultConfig {
         applicationId = "com.miruronative"
-        minSdk = 26
+        // Fire OS 5 devices (including the 1st/2nd-gen Fire TV Sticks) report API 22.
+        minSdk = 22
         targetSdk = 36
-        versionCode = 33
-        versionName = "0.1.32"
+        versionCode = 34
+        versionName = "0.1.33"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -60,6 +62,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -74,14 +77,34 @@ android {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
 
+    // Fire TV hardware is ARM. Publish a small APK for each ARM generation and retain a
+    // universal APK for users who do not know which one their device needs.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = true
+        }
+    }
+
     applicationVariants.all {
         outputs.all {
-            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName = "anilili.apk"
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            val abi = output.getFilter(OutputFile.ABI)
+            val buildTypeSuffix = if (buildType.name == "release") "" else "-${buildType.name}"
+            output.outputFileName = if (abi == null) {
+                "anilili$buildTypeSuffix.apk"
+            } else {
+                "anilili$buildTypeSuffix-$abi.apk"
+            }
         }
     }
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -112,6 +135,7 @@ dependencies {
 
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
+    implementation(libs.okio)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.coil.compose)
     implementation(libs.androidx.room.runtime)

@@ -111,7 +111,7 @@ internal fun jwtSubject(token: String): Int? = jwtLongClaim(token, "sub")?.toInt
 
 private fun jwtLongClaim(token: String, name: String): Long? = runCatching {
     val payload = token.split('.').getOrNull(1) ?: return@runCatching null
-    val decoded = java.util.Base64.getUrlDecoder().decode(payload)
+    val decoded = com.miruronative.util.Base64Compat.decode(payload)
     val value = jwtJson.parseToJsonElement(decoded.toString(Charsets.UTF_8)).jsonObject[name]?.jsonPrimitive
     value?.longOrNull ?: value?.intOrNull?.toLong()
 }.getOrNull()

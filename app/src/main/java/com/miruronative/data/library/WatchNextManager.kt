@@ -1,5 +1,6 @@
 package com.miruronative.data.library
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -25,6 +26,7 @@ object WatchNextManager {
     /** Progress saves arrive every few seconds during playback; the launcher doesn't need that. */
     private val lastPublished = ConcurrentHashMap<Int, Long>()
 
+    @SuppressLint("RestrictedApi") // tvprovider exposes these builder methods for launcher clients.
     fun publish(context: Context, entry: HistoryEntry) {
         if (!AppGraph.isTv) return
         val now = System.currentTimeMillis()

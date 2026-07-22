@@ -64,10 +64,6 @@ internal class SubtitleDelayRenderer(renderer: Renderer) : ForwardingRenderer(re
         super.render(shift(positionUs), elapsedRealtimeUs)
     }
 
-    override fun resetPosition(positionUs: Long, joining: Boolean) {
-        super.resetPosition(shift(positionUs), joining)
-    }
-
     // Left exactly alone while no delay is set, so the untouched case stays the stock path. The
     // shifted value may go negative early in an episode; that simply means "before the first cue",
     // which is the honest answer when the first line is not due yet.

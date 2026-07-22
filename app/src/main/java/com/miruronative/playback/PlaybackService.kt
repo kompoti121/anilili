@@ -15,6 +15,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.cast.CastPlayer
+import androidx.media3.cast.SessionAvailabilityListener
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.HttpDataSource
@@ -26,6 +27,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.google.android.gms.cast.framework.CastContext
 import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.MainActivity
 import com.miruronative.ui.nav.Routes
@@ -110,12 +112,85 @@ class PlaybackService : MediaSessionService() {
                 )
                 setHandleAudioBecomingNoisy(true)
             }
-        castPlayer = CastPlayer.Builder(this)
-            .setLocalPlayer(player)
+        castPlayer = CastPlayer(CastContext.getSharedInstance(this))
+        activePlayer = player
+        player.addListener(playbackListener(player))
+        castPlayer.addListener(playbackListener(castPlayer))
+
+        val localEpisodeAwarePlayer = episodeAwarePlayer(player)
+        val castEpisodeAwarePlayer = episodeAwarePlayer(castPlayer)
+
+        // Brand the media notification: Media3's provider handles layout, actions, and artwork
+        // (loading MediaMetadata.artworkUri itself); only the small icon needs overriding.
+        setMediaNotificationProvider(
+            androidx.media3.session.DefaultMediaNotificationProvider.Builder(this)
+                .build()
+                .apply { setSmallIcon(com.miruronative.R.drawable.ic_notification) },
+        )
+        session = MediaSession.Builder(this, localEpisodeAwarePlayer)
+            .setSessionActivity(sessionActivity(null))
+            .setCallback(object : MediaSession.Callback {
+                // A paused-but-loaded session normally resumes on any KEYCODE_MEDIA_PLAY —
+                // including ones a Bluetooth headset or car fires on reconnect, which made
+                // paused audio restart in the background "by itself". While the app is
+                // backgrounded after a lifecycle pause, ignore media-button play; the
+                // notification's own play action arrives as a controller command (not a key
+                // event), so deliberate resumes still work.
+                override fun onMediaButtonEvent(
+                    session: MediaSession,
+                    controllerInfo: MediaSession.ControllerInfo,
+                    intent: Intent,
+                ): Boolean {
+                    val key = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
+                    }
+                    val isResumeKey = key?.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
+                        key?.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+                        key?.keyCode == KeyEvent.KEYCODE_HEADSETHOOK
+                    if (isResumeKey && suppressMediaButtonResume && activePlayer?.isPlaying != true) {
+                        DiagnosticsLog.event(
+                            "PlaybackService ignored background media-button resume key=${key?.keyCode}",
+                        )
+                        return true
+                    }
+                    return super.onMediaButtonEvent(session, controllerInfo, intent)
+                }
+            })
             .build()
-            .apply {
-                addListener(object : Player.Listener {
+        session.setMediaButtonPreferences(
+            listOf(
+                CommandButton.Builder(CommandButton.ICON_REWIND)
+                    .setDisplayName("Rewind 10 seconds")
+                    .setPlayerCommand(Player.COMMAND_SEEK_BACK)
+                    .build(),
+                CommandButton.Builder(CommandButton.ICON_FAST_FORWARD)
+                    .setDisplayName("Forward 10 seconds")
+                    .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
+                    .build(),
+            ),
+        )
+
+        // Media3 1.9 introduced CastPlayer.Builder.setLocalPlayer(), but that release also raised
+        // minSdk to 23. Keep the same local/cast hand-off explicitly so Fire OS 5 (API 22) can use
+        // the player without sacrificing casting on newer devices.
+        castPlayer.setSessionAvailabilityListener(object : SessionAvailabilityListener {
+            override fun onCastSessionAvailable() {
+                switchPlaybackPlayer(player, castPlayer, castEpisodeAwarePlayer)
+            }
+
+            override fun onCastSessionUnavailable() {
+                switchPlaybackPlayer(castPlayer, player, localEpisodeAwarePlayer)
+            }
+        })
+    }
+
+    private fun playbackListener(source: Player): Player.Listener =
+        object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        if (activePlayer !== source) return
                         DiagnosticsLog.event("PlaybackService player isPlaying=$isPlaying")
                         PlaybackStatus.update(isPlaying)
                         // Any playback that actually starts (notification play, in-app play)
@@ -129,6 +204,7 @@ class PlaybackService : MediaSessionService() {
                     }
 
                     override fun onDeviceInfoChanged(deviceInfo: DeviceInfo) {
+                        if (activePlayer !== source) return
                         val route = if (deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE) {
                             "remote"
                         } else {
@@ -141,10 +217,12 @@ class PlaybackService : MediaSessionService() {
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
+                        if (activePlayer !== source) return
                         DiagnosticsLog.throwable("PlaybackService player error code=${error.errorCodeName}", error)
                     }
 
                     override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                        if (activePlayer !== source) return
                         DiagnosticsLog.event(
                             "PlaybackService media transition reason=$reason " +
                                 "mediaId=${mediaItem?.mediaId?.take(120) ?: "none"}",
@@ -153,15 +231,14 @@ class PlaybackService : MediaSessionService() {
                         val route = mediaItem?.mediaMetadata?.extras?.getString(EXTRA_WATCH_ROUTE)
                         session.setSessionActivity(sessionActivity(route))
                     }
-                })
-            }
-        activePlayer = castPlayer
+                }
 
+    private fun episodeAwarePlayer(delegate: Player): ForwardingPlayer =
         // The playlist holds one media item at a time (episodes resolve lazily, per provider),
         // but the session still advertises next/previous by forwarding them to the app's
         // episode navigator. That lights up Media3's built-in prev/next buttons and makes the
         // media notification and hardware/Bluetooth media keys switch episodes.
-        val episodeAwarePlayer = object : ForwardingPlayer(castPlayer) {
+        object : ForwardingPlayer(delegate) {
             override fun getAvailableCommands(): Player.Commands =
                 super.getAvailableCommands().buildUpon()
                     .addAll(
@@ -203,65 +280,34 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
-        // Brand the media notification: Media3's provider handles layout, actions, and artwork
-        // (loading MediaMetadata.artworkUri itself); only the small icon needs overriding.
-        setMediaNotificationProvider(
-            androidx.media3.session.DefaultMediaNotificationProvider.Builder(this)
-                .build()
-                .apply { setSmallIcon(com.miruronative.R.drawable.ic_notification) },
-        )
-        session = MediaSession.Builder(this, episodeAwarePlayer)
-            .setSessionActivity(sessionActivity(null))
-            .setCallback(object : MediaSession.Callback {
-                // A paused-but-loaded session normally resumes on any KEYCODE_MEDIA_PLAY —
-                // including ones a Bluetooth headset or car fires on reconnect, which made
-                // paused audio restart in the background "by itself". While the app is
-                // backgrounded after a lifecycle pause, ignore media-button play; the
-                // notification's own play action arrives as a controller command (not a key
-                // event), so deliberate resumes still work.
-                override fun onMediaButtonEvent(
-                    session: MediaSession,
-                    controllerInfo: MediaSession.ControllerInfo,
-                    intent: Intent,
-                ): Boolean {
-                    val key = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
-                    }
-                    val isResumeKey = key?.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
-                        key?.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
-                        key?.keyCode == KeyEvent.KEYCODE_HEADSETHOOK
-                    if (isResumeKey && suppressMediaButtonResume && !castPlayer.isPlaying) {
-                        DiagnosticsLog.event(
-                            "PlaybackService ignored background media-button resume key=${key?.keyCode}",
-                        )
-                        return true
-                    }
-                    return super.onMediaButtonEvent(session, controllerInfo, intent)
-                }
-            })
-            .build()
-        session.setMediaButtonPreferences(
-            listOf(
-                CommandButton.Builder(CommandButton.ICON_REWIND)
-                    .setDisplayName("Rewind 10 seconds")
-                    .setPlayerCommand(Player.COMMAND_SEEK_BACK)
-                    .build(),
-                CommandButton.Builder(CommandButton.ICON_FAST_FORWARD)
-                    .setDisplayName("Forward 10 seconds")
-                    .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
-                    .build(),
-            ),
+    private fun switchPlaybackPlayer(from: Player, to: Player, sessionPlayer: Player) {
+        if (activePlayer === to) return
+        val mediaItems = List(from.mediaItemCount) { from.getMediaItemAt(it) }
+        val currentIndex = from.currentMediaItemIndex.coerceIn(0, (mediaItems.size - 1).coerceAtLeast(0))
+        val currentPosition = from.currentPosition.coerceAtLeast(0L)
+        val shouldPlay = from.playWhenReady
+
+        activePlayer = to
+        session.player = sessionPlayer
+        if (mediaItems.isNotEmpty()) {
+            to.setMediaItems(mediaItems, currentIndex, currentPosition)
+            to.prepare()
+            to.playWhenReady = shouldPlay
+        }
+        from.stop()
+        from.clearMediaItems()
+        DiagnosticsLog.event(
+            "PlaybackService switched route=${if (to === castPlayer) "remote" else "local"} " +
+                "items=${mediaItems.size} positionMs=$currentPosition play=$shouldPlay",
         )
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        DiagnosticsLog.event("PlaybackService.onTaskRemoved playing=${if (::castPlayer.isInitialized) castPlayer.playWhenReady else false}")
-        if (!::castPlayer.isInitialized || !castPlayer.playWhenReady || castPlayer.mediaItemCount == 0) stopSelf()
+        val active = activePlayer
+        DiagnosticsLog.event("PlaybackService.onTaskRemoved playing=${active?.playWhenReady == true}")
+        if (active?.playWhenReady != true || active.mediaItemCount == 0) stopSelf()
     }
 
     override fun onDestroy() {
@@ -271,11 +317,8 @@ class PlaybackService : MediaSessionService() {
         episodeNavigator = null
         PlaybackStatus.update(false)
         if (::session.isInitialized) session.release()
-        if (::castPlayer.isInitialized) {
-            castPlayer.release()
-        } else if (::player.isInitialized) {
-            player.release()
-        }
+        if (::castPlayer.isInitialized) castPlayer.release()
+        if (::player.isInitialized) player.release()
         super.onDestroy()
     }
 

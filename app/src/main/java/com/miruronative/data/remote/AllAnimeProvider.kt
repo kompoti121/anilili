@@ -5,9 +5,9 @@ import com.miruronative.data.model.SourcesResult
 import com.miruronative.data.model.StreamItem
 import com.miruronative.data.model.SubtitleItem
 import com.miruronative.diagnostics.DiagnosticsLog
+import com.miruronative.util.Base64Compat
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
-import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
@@ -498,7 +498,7 @@ internal object AllAnimeCodec {
     }
 
     fun decrypt(encoded: String): JsonElement {
-        val bytes = Base64.getDecoder().decode(encoded)
+        val bytes = Base64Compat.decode(encoded)
         require(bytes.size > 29) { "AllAnime encrypted payload is too short" }
         val iv = bytes.copyOfRange(1, 13)
         val counter = iv + byteArrayOf(0, 0, 0, 2)
@@ -512,7 +512,7 @@ internal object AllAnimeCodec {
 
     fun epochKey(partB: String, maskHex: String): ByteArray {
         val mask = maskHex.chunked(2).map { it.toInt(16).toByte() }
-        val second = Base64.getDecoder().decode(partB)
+        val second = Base64Compat.decode(partB)
         require(mask.size >= 16 && second.size >= 32) { "AllAnime epoch key is invalid" }
         return ByteArray(32) { index -> (second[index].toInt() xor mask[index % mask.size].toInt()).toByte() }
     }
@@ -532,11 +532,11 @@ internal object AllAnimeCodec {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
         val encrypted = cipher.doFinal(plaintext.toByteArray(StandardCharsets.UTF_8))
-        return Base64.getEncoder().encodeToString(byteArrayOf(1) + iv + encrypted)
+        return Base64Compat.encode(byteArrayOf(1) + iv + encrypted)
     }
 
     fun decryptGcm(encoded: String, key: ByteArray): JsonElement {
-        val envelope = Base64.getDecoder().decode(encoded)
+        val envelope = Base64Compat.decode(encoded)
         require(envelope.size > 29 && envelope[0].toInt() == 1) { "AllAnime encrypted payload is invalid" }
         val iv = envelope.copyOfRange(1, 13)
         val encrypted = envelope.copyOfRange(13, envelope.size)

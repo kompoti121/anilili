@@ -5,6 +5,12 @@ import org.junit.Test
 
 class PlayerGestureControlsTest {
     @Test
+    fun playbackTogglePausesEvenWhilePlaybackIsBuffering() {
+        assertEquals(false, playerToggleWillPlay(playWhenReady = true))
+        assertEquals(true, playerToggleWillPlay(playWhenReady = false))
+    }
+
+    @Test
     fun horizontalSlideSeeksRelativeToDragDistance() {
         assertEquals(
             630_000L,

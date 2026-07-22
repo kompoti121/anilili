@@ -7,7 +7,6 @@
         <item name="android:statusBarColor">@color/miruro_bg</item>
         <item name="android:navigationBarColor">@color/miruro_bg</item>
         <item name="android:windowBackground">@color/miruro_bg</item>
-        <item name="android:windowLightStatusBar">false</item>
     </style>
 
     <!-- AppCompat-derived theme used only as a ContextThemeWrapper for the Cast
