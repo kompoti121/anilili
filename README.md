@@ -1,32 +1,39 @@
 # Anilili
 
 Anilili is a native Android anime streaming client built with Kotlin, Jetpack Compose, and
-Media3. Metadata, login, library lists, and progress sync are powered by AniList, while
-episodes and stream sources are resolved from multiple providers: Miruro, AniKoto,
-ReAnime, AniZone, AnimeGG, AniNeko, and 2DHive.
+Media3. Metadata, login, library lists, and progress sync are powered by AniList or
+MyAnimeList, while episodes and stream sources are resolved from multiple providers:
+Miruro, AniKoto, ReAnime, AniZone, AnimeGG, AniNeko, and 2DHive.
+
+It runs on phones, tablets, Android TV, and Fire TV down to Android 5.1 / Fire OS 5 (API 22).
+
+<p align="center">
+  <a href="https://kompoti121.github.io/anilili/"><b>Website</b></a> ·
+  <a href="https://github.com/kompoti121/anilili/releases/latest"><b>Download APK</b></a> ·
+  <a href="https://t.me/anililiapk"><b>Telegram</b></a>
+</p>
 
 Miruro streams are requested through the Miruro pipe endpoint and decoded on device.
 Additional provider sources are resolved through the Anivexa-backed provider client. HLS
 streams play with ExoPlayer; embed providers and fallback playback use WebView.
 
-> Personal and educational project. This app is not affiliated with AniList, Miruro,
-> AniKoto, ReAnime, AniZone, AnimeGG, AniNeko, or 2DHive. Distribute as a sideloaded APK.
+> Personal and educational project. This app is not affiliated with AniList, MyAnimeList,
+> Miruro, AniKoto, ReAnime, AniZone, AnimeGG, AniNeko, or 2DHive. It hosts no content;
+> streams are resolved from third-party providers at playback time. Sideloaded APK only.
 
 ## Screenshots
 
-<p align="center">
-  <a href="showcase/mobile/01-home.webp"><img src="showcase/mobile/01-home.webp" width="180" alt="Anilili home screen" /></a>
-  <a href="showcase/mobile/02-browse.webp"><img src="showcase/mobile/02-browse.webp" width="180" alt="Anime browse screen" /></a>
-  <a href="showcase/mobile/03-search.webp"><img src="showcase/mobile/03-search.webp" width="180" alt="Anime search results" /></a>
-</p>
-<p align="center">
-  <a href="showcase/mobile/04-details.webp"><img src="showcase/mobile/04-details.webp" width="180" alt="Anime details and server selection" /></a>
-  <a href="showcase/mobile/05-watch.webp"><img src="showcase/mobile/05-watch.webp" width="180" alt="Watch screen with episode list" /></a>
-  <a href="showcase/mobile/06-player-controls.webp"><img src="showcase/mobile/06-player-controls.webp" width="180" alt="Player controls with subtitles and casting" /></a>
-</p>
-<p align="center">
-  <a href="showcase/mobile/07-library.webp"><img src="showcase/mobile/07-library.webp" width="180" alt="Library with watchlist and continue watching" /></a>
-</p>
+| Home | Browse | Search |
+| :---: | :---: | :---: |
+| <a href="showcase/mobile/01-home.webp"><img src="showcase/mobile/01-home.webp" width="200" alt="Anilili home screen" /></a> | <a href="showcase/mobile/02-browse.webp"><img src="showcase/mobile/02-browse.webp" width="200" alt="Anime browse screen" /></a> | <a href="showcase/mobile/03-search.webp"><img src="showcase/mobile/03-search.webp" width="200" alt="Anime search results" /></a> |
+
+| Details | Watch | Player controls |
+| :---: | :---: | :---: |
+| <a href="showcase/mobile/04-details.webp"><img src="showcase/mobile/04-details.webp" width="200" alt="Anime details and server selection" /></a> | <a href="showcase/mobile/05-watch.webp"><img src="showcase/mobile/05-watch.webp" width="200" alt="Watch screen with episode list" /></a> | <a href="showcase/mobile/06-player-controls.webp"><img src="showcase/mobile/06-player-controls.webp" width="200" alt="Player controls with subtitles and casting" /></a> |
+
+| Library |
+| :---: |
+| <a href="showcase/mobile/07-library.webp"><img src="showcase/mobile/07-library.webp" width="200" alt="Library with watchlist and continue watching" /></a> |
 
 ## Features
 
@@ -80,10 +87,14 @@ On Windows, use:
 gradlew.bat assembleDebug
 ```
 
-Debug builds generate three APKs in `app/build/outputs/apk/debug/`: `anilili-debug.apk`
-(universal), `anilili-debug-arm64-v8a.apk`, and `anilili-debug-armeabi-v7a.apk`.
-Release builds use the same three-way layout without the `-debug` suffix. The universal release
-keeps the update-compatible name `anilili.apk`. All three support Android/Fire OS API 22 and up.
+Debug builds generate three APKs in `app/build/outputs/apk/debug/`: `Anilili-debug.apk`
+(universal), `Anilili-debug-arm64-v8a.apk`, and `Anilili-debug-armeabi-v7a.apk`.
+Release builds use the same three-way layout without the `-debug` suffix. All three support
+Android/Fire OS API 22 and up.
+
+Release assets must keep these names: the in-app updater picks the ABI split by matching
+`arm64-v8a` / `armeabi-v7a` in the asset name and falls back to the universal `Anilili.apk`.
+Matching is case-insensitive, so lowercase assets from releases before v0.1.34 still resolve.
 
 ## Notes
 

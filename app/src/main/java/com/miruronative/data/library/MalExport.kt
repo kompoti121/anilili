@@ -27,7 +27,7 @@ data class MalExportFile(
 object MalExport {
     fun fromEntries(username: String?, entries: List<MalExportEntry>, skippedCount: Int): MalExportFile {
         val date = LocalDate.now()
-        val fileName = "anilili-mal-export-${date.format(DateTimeFormatter.BASIC_ISO_DATE)}.xml"
+        val fileName = "Anilili-mal-export-${date.format(DateTimeFormatter.BASIC_ISO_DATE)}.xml"
         val xml = buildString {
             appendLine("""<?xml version="1.0" encoding="UTF-8" ?>""")
             appendLine("<myanimelist>")

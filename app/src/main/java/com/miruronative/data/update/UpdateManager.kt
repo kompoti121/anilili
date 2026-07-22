@@ -178,7 +178,7 @@ object UpdateManager {
     private fun downloadApk(context: Context, info: UpdateInfo): File {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
-        val file = File(dir, "anilili-${info.version}.apk")
+        val file = File(dir, "Anilili-${info.version}.apk")
         // No call timeout: the release APK takes longer than the API client's 45s cap on slow links.
         val client = AppGraph.httpClient.newBuilder()
             .cache(null)
@@ -234,7 +234,7 @@ internal fun preferredReleaseApkName(names: List<String>, supportedAbis: List<St
     }
     return preferredAbi?.let { abi ->
         apks.firstOrNull { it.contains(abi, ignoreCase = true) }
-    } ?: apks.firstOrNull { it.equals("anilili.apk", ignoreCase = true) }
+    } ?: apks.firstOrNull { it.equals("Anilili.apk", ignoreCase = true) }
         ?: apks.firstOrNull { it.contains("universal", ignoreCase = true) }
         ?: apks.first()
 }

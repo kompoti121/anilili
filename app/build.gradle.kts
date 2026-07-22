@@ -24,8 +24,8 @@ android {
         // Fire OS 5 devices (including the 1st/2nd-gen Fire TV Sticks) report API 22.
         minSdk = 22
         targetSdk = 36
-        versionCode = 34
-        versionName = "0.1.33"
+        versionCode = 35
+        versionName = "0.1.34"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -94,9 +94,9 @@ android {
             val abi = output.getFilter(OutputFile.ABI)
             val buildTypeSuffix = if (buildType.name == "release") "" else "-${buildType.name}"
             output.outputFileName = if (abi == null) {
-                "anilili$buildTypeSuffix.apk"
+                "Anilili$buildTypeSuffix.apk"
             } else {
-                "anilili$buildTypeSuffix-$abi.apk"
+                "Anilili$buildTypeSuffix-$abi.apk"
             }
         }
     }

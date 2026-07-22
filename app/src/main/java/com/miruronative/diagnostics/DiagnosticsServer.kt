@@ -66,7 +66,7 @@ object DiagnosticsServer {
             (
                 "HTTP/1.1 200 OK\r\n" +
                     "Content-Type: text/plain; charset=utf-8\r\n" +
-                    "Content-Disposition: attachment; filename=\"anilili-diagnostics.txt\"\r\n" +
+                    "Content-Disposition: attachment; filename=\"Anilili-diagnostics.txt\"\r\n" +
                     "Content-Length: ${bytes.size}\r\n" +
                     "Connection: close\r\n" +
                     "\r\n"

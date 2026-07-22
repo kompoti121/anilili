@@ -69,6 +69,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.NavType
@@ -550,7 +551,7 @@ private fun AppNavigationRail(
         containerColor = MaterialTheme.colorScheme.surface,
         header = {
             Text(
-                "anilili",
+                stringResource(R.string.app_name),
                 color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(vertical = 20.dp),

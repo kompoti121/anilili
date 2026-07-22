@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 object DiagnosticsLog {
     private const val LOG_DIR = "diagnostics"
     private const val LOG_FILE = "diagnostics.txt"
-    private const val SHARE_FILE = "anilili-diagnostics.txt"
+    private const val SHARE_FILE = "Anilili-diagnostics.txt"
     private const val MAX_BYTES = 900_000L
     private const val TRIM_TO_BYTES = 650_000
 
@@ -286,7 +286,7 @@ object DiagnosticsLog {
      * with a file manager or over USB. Timestamped so repeated shares don't shadow each other.
      */
     fun saveToDownloads(context: Context, snapshot: File): Result<String> = runCatching {
-        val name = "anilili-diagnostics-" +
+        val name = "Anilili-diagnostics-" +
             SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".txt"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
