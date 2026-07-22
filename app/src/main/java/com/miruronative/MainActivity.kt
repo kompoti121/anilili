@@ -57,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -302,6 +303,8 @@ private fun MiruroRoot(
     var chromeVisible by remember { mutableStateOf(true) }
     val chromeScope = rememberCoroutineScope()
     var restoreChromeJob by remember { mutableStateOf<Job?>(null) }
+    val tvSearchRailFocusRequester = remember { FocusRequester() }
+    val tvSearchFieldFocusRequester = remember { FocusRequester() }
     // Direction-based like YouTube/Chrome: hide once a downward scroll passes a small threshold,
     // show the moment the user scrolls up (or goes idle). The threshold stops micro-scrolls from
     // flickering the chrome, and hide/show firing once per direction change (instead of on every
@@ -409,12 +412,15 @@ private fun MiruroRoot(
                             currentRoute = currentRoute,
                             menuLanguage = menuLanguage,
                             onNavigate = nav::navigateTab,
+                            searchRailFocusRequester = tvSearchRailFocusRequester,
+                            searchFieldFocusRequester = tvSearchFieldFocusRequester,
                             modifier = Modifier.fillMaxHeight(),
                         )
                     }
                     AppNavHost(
                         nav = nav,
                         inPictureInPicture = inPictureInPicture,
+                        tvSearchFieldFocusRequester = tvSearchFieldFocusRequester,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -506,10 +512,16 @@ private fun AppNavigationRail(
     currentRoute: String?,
     menuLanguage: MenuLanguage,
     onNavigate: (String) -> Unit,
+    searchRailFocusRequester: FocusRequester,
+    searchFieldFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     val device = LocalAppDeviceProfile.current
-    val focusRequesters = remember { Tab.entries.associateWith { FocusRequester() } }
+    val focusRequesters = remember(searchRailFocusRequester) {
+        Tab.entries.associateWith { tab ->
+            if (tab == Tab.SEARCH) searchRailFocusRequester else FocusRequester()
+        }
+    }
     LaunchedEffect(currentRoute, device.isTv) {
         if (device.isTv) {
             Tab.entries.firstOrNull { it.route == currentRoute }
@@ -538,6 +550,13 @@ private fun AppNavigationRail(
                 alwaysShowLabel = device.isTv,
                 modifier = Modifier
                     .focusRequester(focusRequesters.getValue(tab))
+                    .focusProperties {
+                        // Spatial focus search prefers the Movies chip because it is horizontally
+                        // aligned with the rail item. Route Right to the actual search box.
+                        if (device.isTv && tab == Tab.SEARCH && currentRoute == Routes.SEARCH) {
+                            right = searchFieldFocusRequester
+                        }
+                    }
                     .focusHighlight(),
             )
         }
@@ -548,6 +567,7 @@ private fun AppNavigationRail(
 private fun AppNavHost(
     nav: androidx.navigation.NavHostController,
     inPictureInPicture: Boolean,
+    tvSearchFieldFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -578,7 +598,10 @@ private fun AppNavHost(
             }
             composable(Routes.SEARCH) {
                 LaunchedEffect(Unit) { DiagnosticsLog.event("Route SEARCH content entered") }
-                SearchScreen(onAnimeClick = { id -> nav.navigate(Routes.detail(id)) })
+                SearchScreen(
+                    onAnimeClick = { id -> nav.navigate(Routes.detail(id)) },
+                    tvFieldFocusRequester = tvSearchFieldFocusRequester,
+                )
             }
             composable(Routes.SCHEDULE) {
                 LaunchedEffect(Unit) { DiagnosticsLog.event("Route SCHEDULE content entered") }

@@ -61,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -94,6 +95,7 @@ fun SearchScreen(
     onAnimeClick: (Int) -> Unit,
     modifier: Modifier = Modifier,
     vm: SearchViewModel = viewModel(),
+    tvFieldFocusRequester: FocusRequester? = null,
 ) {
     val state by vm.state.collectAsState()
     val isRefreshing by vm.isRefreshing.collectAsState()
@@ -116,7 +118,12 @@ fun SearchScreen(
     ) {
         AnimatedVisibility(visible = topBarVisible) {
             Column {
-                SearchTopBar(vm = vm, options = options, onOpenFilters = { showFilters = true })
+                SearchTopBar(
+                    vm = vm,
+                    options = options,
+                    onOpenFilters = { showFilters = true },
+                    tvFieldFocusRequester = tvFieldFocusRequester,
+                )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .7f))
             }
         }
@@ -158,6 +165,7 @@ private fun SearchTopBar(
     vm: SearchViewModel,
     options: DiscoverOptions,
     onOpenFilters: () -> Unit,
+    tvFieldFocusRequester: FocusRequester?,
 ) {
     val device = LocalAppDeviceProfile.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -188,7 +196,10 @@ private fun SearchTopBar(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TvDeferredTextField(Modifier.weight(1f).widthIn(min = 0.dp, max = 720.dp)) { fieldModifier ->
+                TvDeferredTextField(
+                    modifier = Modifier.weight(1f).widthIn(min = 0.dp, max = 720.dp),
+                    tvFocusRequester = tvFieldFocusRequester,
+                ) { fieldModifier ->
                     OutlinedTextField(
                         value = vm.query,
                         onValueChange = vm::onQueryChange,

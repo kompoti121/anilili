@@ -53,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -110,6 +111,9 @@ fun DetailScreen(
     val isRefreshing by vm.isRefreshing.collectAsState()
     val watchlist by LibraryStore.watchlist.collectAsState()
     val history by LibraryStore.history.collectAsState()
+    val backFocusRequester = remember { FocusRequester() }
+    val primaryActionFocusRequester = remember { FocusRequester() }
+    val detailActionsReady = state is UiState.Success
 
     Scaffold(
         topBar = {
@@ -119,7 +123,16 @@ fun DetailScreen(
                     navigationIcon = {
                         IconButton(
                             onClick = onBack,
-                            modifier = Modifier.focusHighlight(RoundedCornerShape(24.dp)),
+                            modifier = Modifier
+                                .focusRequester(backFocusRequester)
+                                .then(
+                                    if (detailActionsReady) {
+                                        Modifier.focusProperties { down = primaryActionFocusRequester }
+                                    } else {
+                                        Modifier
+                                    },
+                                )
+                                .focusHighlight(RoundedCornerShape(24.dp)),
                         ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
@@ -167,6 +180,8 @@ fun DetailScreen(
                         onAnimeClick = onAnimeClick,
                         onSeasonWatch = onSeasonWatch,
                         onSelectSeason = vm::selectSeason,
+                        backFocusRequester = backFocusRequester,
+                        primaryActionFocusRequester = primaryActionFocusRequester,
                     )
                 }
             }
@@ -186,6 +201,8 @@ private fun DetailContent(
     onAnimeClick: (Int) -> Unit,
     onSeasonWatch: (Int) -> Unit,
     onSelectSeason: (Int) -> Unit,
+    backFocusRequester: FocusRequester,
+    primaryActionFocusRequester: FocusRequester,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
     val info = data.info
@@ -193,6 +210,7 @@ private fun DetailContent(
     val episodes = data.episodes
     var selectedTab by remember(info.id) { mutableStateOf(DetailTab.HOME) }
     val canWatch = episodes.isNotEmpty()
+    val primaryActionIsWatch = canWatch || resume != null
     val playCurrent: () -> Unit = {
         when {
             resume != null -> onPlay(info.id, resume.provider, resume.category, resume.episodeLabel)
@@ -229,11 +247,13 @@ private fun DetailContent(
         item {
             DetailActions(
                 saved = saved,
-                canWatch = canWatch || resume != null,
+                canWatch = primaryActionIsWatch,
                 resolving = false,
                 resume = resume,
                 onToggleSaved = onToggleSaved,
                 onWatch = playCurrent,
+                backFocusRequester = backFocusRequester,
+                primaryActionFocusRequester = primaryActionFocusRequester,
             )
         }
         resume?.let { entry ->
@@ -449,6 +469,8 @@ private fun DetailActions(
     resume: HistoryEntry?,
     onToggleSaved: () -> Unit,
     onWatch: () -> Unit,
+    backFocusRequester: FocusRequester,
+    primaryActionFocusRequester: FocusRequester,
 ) {
     val pad = LocalAppDeviceProfile.current.pagePadding
     Row(
@@ -457,7 +479,14 @@ private fun DetailActions(
     ) {
         OutlinedButton(
             onClick = onToggleSaved,
-            modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(24.dp)),
+            modifier = Modifier
+                .weight(1f)
+                .then(
+                    if (!canWatch) Modifier.focusRequester(primaryActionFocusRequester)
+                    else Modifier,
+                )
+                .focusProperties { up = backFocusRequester }
+                .focusHighlight(RoundedCornerShape(24.dp)),
         ) {
             Icon(
                 imageVector = if (saved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -469,7 +498,14 @@ private fun DetailActions(
         Button(
             onClick = onWatch,
             enabled = canWatch,
-            modifier = Modifier.weight(1f).focusHighlight(RoundedCornerShape(24.dp)),
+            modifier = Modifier
+                .weight(1f)
+                .then(
+                    if (canWatch) Modifier.focusRequester(primaryActionFocusRequester)
+                    else Modifier,
+                )
+                .focusProperties { up = backFocusRequester }
+                .focusHighlight(RoundedCornerShape(24.dp)),
         ) {
             if (resolving) {
                 CircularProgressIndicator(

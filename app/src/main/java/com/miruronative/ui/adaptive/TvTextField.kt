@@ -51,6 +51,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun TvDeferredTextField(
     modifier: Modifier = Modifier,
+    tvFocusRequester: FocusRequester? = null,
     field: @Composable (Modifier) -> Unit,
 ) {
     val device = LocalAppDeviceProfile.current
@@ -87,6 +88,7 @@ fun TvDeferredTextField(
 
     Box(
         modifier
+            .then(tvFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .focusProperties { canFocus = !editing }
             .focusHighlight(RoundedCornerShape(10.dp))
             .clickable(onClickLabel = "Edit text", role = Role.Button) { editing = true },
