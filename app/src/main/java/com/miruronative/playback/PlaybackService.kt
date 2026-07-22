@@ -51,7 +51,7 @@ object PlaybackStatus {
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
     private lateinit var player: ExoPlayer
-    private lateinit var castPlayer: CastPlayer
+    private var castPlayer: CastPlayer? = null
     private lateinit var session: MediaSession
     private lateinit var httpFactory: HttpDataSource.Factory
 
@@ -112,13 +112,17 @@ class PlaybackService : MediaSessionService() {
                 )
                 setHandleAudioBecomingNoisy(true)
             }
-        castPlayer = CastPlayer(CastContext.getSharedInstance(this))
+        // Some Android TV boxes ship a Play Services shell without the cast dynamite module;
+        // CastContext.getSharedInstance throws there ("No acceptable module ... found") and
+        // must not take the whole service down — playback just runs without Cast.
+        castPlayer = runCatching { CastPlayer(CastContext.getSharedInstance(this)) }
+            .onFailure { DiagnosticsLog.throwable("PlaybackService cast unavailable", it) }
+            .getOrNull()
         activePlayer = player
         player.addListener(playbackListener(player))
-        castPlayer.addListener(playbackListener(castPlayer))
+        castPlayer?.let { it.addListener(playbackListener(it)) }
 
         val localEpisodeAwarePlayer = episodeAwarePlayer(player)
-        val castEpisodeAwarePlayer = episodeAwarePlayer(castPlayer)
 
         // Brand the media notification: Media3's provider handles layout, actions, and artwork
         // (loading MediaMetadata.artworkUri itself); only the small icon needs overriding.
@@ -176,15 +180,18 @@ class PlaybackService : MediaSessionService() {
         // Media3 1.9 introduced CastPlayer.Builder.setLocalPlayer(), but that release also raised
         // minSdk to 23. Keep the same local/cast hand-off explicitly so Fire OS 5 (API 22) can use
         // the player without sacrificing casting on newer devices.
-        castPlayer.setSessionAvailabilityListener(object : SessionAvailabilityListener {
-            override fun onCastSessionAvailable() {
-                switchPlaybackPlayer(player, castPlayer, castEpisodeAwarePlayer)
-            }
+        castPlayer?.let { cast ->
+            val castEpisodeAwarePlayer = episodeAwarePlayer(cast)
+            cast.setSessionAvailabilityListener(object : SessionAvailabilityListener {
+                override fun onCastSessionAvailable() {
+                    switchPlaybackPlayer(player, cast, castEpisodeAwarePlayer)
+                }
 
-            override fun onCastSessionUnavailable() {
-                switchPlaybackPlayer(castPlayer, player, localEpisodeAwarePlayer)
-            }
-        })
+                override fun onCastSessionUnavailable() {
+                    switchPlaybackPlayer(cast, player, localEpisodeAwarePlayer)
+                }
+            })
+        }
     }
 
     private fun playbackListener(source: Player): Player.Listener =
@@ -317,7 +324,7 @@ class PlaybackService : MediaSessionService() {
         episodeNavigator = null
         PlaybackStatus.update(false)
         if (::session.isInitialized) session.release()
-        if (::castPlayer.isInitialized) castPlayer.release()
+        castPlayer?.release()
         if (::player.isInitialized) player.release()
         super.onDestroy()
     }

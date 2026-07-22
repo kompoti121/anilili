@@ -6,6 +6,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.annotation.RequiresApi
+import com.miruronative.diagnostics.CrashReporter
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import java.security.SecureRandom
@@ -52,9 +53,19 @@ internal class SecureTokenStore(context: Context, private val slotKey: String = 
     }
 
     private fun encrypt(value: String): String {
-        val softwareKey = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // Some TV boxes ship a broken Keystore HAL and throw on key access; losing
+            // hardware-backing there beats crashing the login. decrypt() picks the key
+            // by the "s:" prefix, so both formats coexist in the same slot.
+            runCatching { return encryptWith(value, hardwareSecretKey(), softwareKey = false) }
+                .onFailure { CrashReporter.logNonFatal("Keystore unavailable; using software token key", it) }
+        }
+        return encryptWith(value, softwareSecretKey(), softwareKey = true)
+    }
+
+    private fun encryptWith(value: String, key: SecretKey, softwareKey: Boolean): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey(softwareKey))
+        cipher.init(Cipher.ENCRYPT_MODE, key)
         cipher.updateAAD(aad)
         val ciphertext = cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8))
         val prefix = if (softwareKey) "$SOFTWARE_KEY_PREFIX:" else ""
