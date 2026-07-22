@@ -8,8 +8,8 @@ Miruro, AniKoto, ReAnime, AniZone, AnimeGG, AniNeko, and 2DHive.
 It runs on phones, tablets, Android TV, and Fire TV down to Android 5.1 / Fire OS 5 (API 22).
 
 <p align="center">
-  <a href="https://kompoti121.github.io/anilili/"><b>Website</b></a> ·
-  <a href="https://github.com/kompoti121/anilili/releases/latest"><b>Download APK</b></a> ·
+  <a href="https://kompoti121.github.io/Anilili/"><b>Website</b></a> ·
+  <a href="https://github.com/kompoti121/Anilili/releases/latest"><b>Download APK</b></a> ·
   <a href="https://t.me/anililiapk"><b>Telegram</b></a>
 </p>
 
@@ -58,7 +58,7 @@ streams play with ExoPlayer; embed providers and fallback playback use WebView.
 | `app/src/main/java/com/miruronative/ui` | Compose screens and player UI |
 | `docs/PIPE_PROTOCOL.md` | Notes about the Miruro pipe format |
 | `showcase/mobile` | Seven optimized 540×1062 WebP screenshots |
-| `docs/` | GitHub Pages landing page (https://kompoti121.github.io/anilili/) |
+| `docs/` | GitHub Pages landing page (https://kompoti121.github.io/Anilili/) |
 
 ## Build
 
