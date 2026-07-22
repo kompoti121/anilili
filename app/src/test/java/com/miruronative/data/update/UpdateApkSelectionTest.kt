@@ -38,6 +38,26 @@ class UpdateApkSelectionTest {
         assertEquals("Anilili.apk", preferredReleaseApkName(assets, listOf("x86_64")))
     }
 
+    /** Asset names since the underscore rename that keeps Anilili.apk first alphabetically. */
+    private val underscoreAssets = listOf(
+        "Anilili.apk",
+        "Anilili_arm64-v8a.apk",
+        "Anilili_armeabi-v7a.apk",
+    )
+
+    @Test
+    fun underscoreNamedSplitsResolvePerAbi() {
+        assertEquals(
+            "Anilili_arm64-v8a.apk",
+            preferredReleaseApkName(underscoreAssets, listOf("arm64-v8a", "armeabi-v7a")),
+        )
+        assertEquals(
+            "Anilili_armeabi-v7a.apk",
+            preferredReleaseApkName(underscoreAssets, listOf("armeabi-v7a")),
+        )
+        assertEquals("Anilili.apk", preferredReleaseApkName(underscoreAssets, listOf("x86_64")))
+    }
+
     @Test
     fun legacyLowercaseAssetsStillResolve() {
         assertEquals(

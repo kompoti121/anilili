@@ -84,13 +84,19 @@ gradlew.bat assembleDebug
 ```
 
 Debug builds generate three APKs in `app/build/outputs/apk/debug/`: `Anilili-debug.apk`
-(universal), `Anilili-debug-arm64-v8a.apk`, and `Anilili-debug-armeabi-v7a.apk`.
+(universal), `Anilili-debug_arm64-v8a.apk`, and `Anilili-debug_armeabi-v7a.apk`.
 Release builds use the same three-way layout without the `-debug` suffix. All three support
 Android/Fire OS API 22 and up.
 
 Release assets must keep these names: the in-app updater picks the ABI split by matching
 `arm64-v8a` / `armeabi-v7a` in the asset name and falls back to the universal `Anilili.apk`.
 Matching is case-insensitive, so lowercase assets from releases before v0.1.34 still resolve.
+
+The ABI splits use `_` (not `-`) before the ABI on purpose: updaters in v0.1.32 and earlier
+install the release's *first* `.apk` asset, and GitHub sorts assets by name. `.` sorts before
+`_`, so the universal `Anilili.apk` stays first and legacy devices always get an APK that runs
+on their hardware. With `-` names, a 32-bit Fire TV on an old version would download the
+arm64 split and hit "app not compatible with this device".
 
 ## Notes
 

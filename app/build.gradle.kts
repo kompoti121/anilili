@@ -93,10 +93,14 @@ android {
             val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
             val abi = output.getFilter(OutputFile.ABI)
             val buildTypeSuffix = if (buildType.name == "release") "" else "-${buildType.name}"
+            // Updaters in v0.1.32 and earlier install the release's first .apk asset, and
+            // GitHub orders assets by name: '.' sorts before '_', so "Anilili.apk" (universal,
+            // runs on every ABI) must precede "Anilili_<abi>.apk". Never name splits with '-';
+            // '-' sorts before '.' and legacy TVs would fetch an incompatible split.
             output.outputFileName = if (abi == null) {
                 "Anilili$buildTypeSuffix.apk"
             } else {
-                "Anilili$buildTypeSuffix-$abi.apk"
+                "Anilili${buildTypeSuffix}_$abi.apk"
             }
         }
     }
