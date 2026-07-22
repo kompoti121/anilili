@@ -17,6 +17,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -52,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -95,6 +98,8 @@ import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.adaptive.rememberAppDeviceProfile
 import com.miruronative.ui.nav.Routes
+import com.miruronative.ui.components.AppLaunchSplash
+import com.miruronative.ui.components.LaunchSplashFadeMillis
 import com.miruronative.ui.components.LocalAppChromeBottomInset
 import com.miruronative.ui.components.LocalAppChromeVisible
 import com.miruronative.ui.notifications.NotificationsScreen
@@ -145,16 +150,26 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    MiruroRoot(
-                        inPictureInPicture = inPictureInPicture,
-                        pendingRoute = pendingRoute,
-                        onRouteConsumed = { pendingRoute = null },
-                    )
-                    var crashReport by remember { mutableStateOf(CrashReporter.pendingReport()) }
-                    crashReport?.let { report ->
-                        CrashReportDialog(report) {
-                            CrashReporter.clear()
-                            crashReport = null
+                    var showLaunchSplash by rememberSaveable { mutableStateOf(true) }
+                    Box(Modifier.fillMaxSize()) {
+                        MiruroRoot(
+                            inPictureInPicture = inPictureInPicture,
+                            pendingRoute = pendingRoute,
+                            onRouteConsumed = { pendingRoute = null },
+                        )
+                        var crashReport by remember { mutableStateOf(CrashReporter.pendingReport()) }
+                        crashReport?.let { report ->
+                            CrashReportDialog(report) {
+                                CrashReporter.clear()
+                                crashReport = null
+                            }
+                        }
+                        AnimatedVisibility(
+                            visible = showLaunchSplash,
+                            modifier = Modifier.fillMaxSize(),
+                            exit = fadeOut(tween(LaunchSplashFadeMillis)),
+                        ) {
+                            AppLaunchSplash(onFinished = { showLaunchSplash = false })
                         }
                     }
                 }

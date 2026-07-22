@@ -36,7 +36,7 @@ fun LoadingBox(modifier: Modifier = Modifier, message: String? = null) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            NoFaceLoadingIndicator(size = 88.dp)
+            WaterFillLogoIndicator(size = 88.dp)
             if (message != null) {
                 Text(
                     text = message,

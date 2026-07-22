@@ -31,7 +31,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -214,7 +213,7 @@ private fun StartupStillLoading(
 ) {
     Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            com.miruronative.ui.components.WaterFillLogoIndicator(size = 72.dp)
             Text(
                 "Still loading",
                 style = MaterialTheme.typography.titleMedium,

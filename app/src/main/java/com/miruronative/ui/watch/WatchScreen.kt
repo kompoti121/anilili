@@ -557,7 +557,7 @@ private fun WatchContent(
                     Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    com.miruronative.ui.components.NoFaceLoadingIndicator(size = 72.dp)
+                    com.miruronative.ui.components.WaterFillLogoIndicator(size = 72.dp)
                 }
             }
             if (!fullscreen) BackButton(onBack, Modifier.align(Alignment.TopStart))

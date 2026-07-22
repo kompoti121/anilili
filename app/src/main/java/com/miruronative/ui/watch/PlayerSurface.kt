@@ -942,7 +942,7 @@ fun PlayerSurface(
         }
 
         if (controller == null) {
-            com.miruronative.ui.components.NoFaceLoadingIndicator(
+            com.miruronative.ui.components.WaterFillLogoIndicator(
                 modifier = Modifier.align(Alignment.Center),
                 size = 72.dp,
             )
