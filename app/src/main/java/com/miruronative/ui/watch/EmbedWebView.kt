@@ -171,6 +171,7 @@ fun EmbedWebView(
     var tvControlsInteraction by remember(url) { mutableIntStateOf(0) }
     var touchControlsVisible by remember(url) { mutableStateOf(true) }
     var touchControlsInteraction by remember(url) { mutableIntStateOf(0) }
+    var playbackGestureIsPlaying by remember(url) { mutableStateOf<Boolean?>(null) }
     var fallbackControlsVisible by remember(url) { mutableStateOf(true) }
     var fallbackInteraction by remember(url) { mutableIntStateOf(0) }
     // A cross-origin page reports nothing back, so the bar for those servers keeps its own guess
@@ -209,6 +210,13 @@ fun EmbedWebView(
         if (!touchControlsActive || !touchControlsVisible || !webIsPlaying) return@LaunchedEffect
         delay(4_000)
         touchControlsVisible = false
+    }
+
+    LaunchedEffect(playbackGestureIsPlaying) {
+        if (playbackGestureIsPlaying != null) {
+            delay(650)
+            playbackGestureIsPlaying = null
+        }
     }
 
     LaunchedEffect(fallbackControlsActive, fallbackControlsVisible, fallbackInteraction) {
@@ -691,14 +699,23 @@ fun EmbedWebView(
                 touchControlsVisible = !touchControlsVisible
                 touchControlsInteraction++
             },
-            onDoubleTap = { isRightHalf ->
-                if (isRightHalf) {
-                    seekWebVideo(webView, positionMs + 10_000L)
-                    positionMs += 10_000L
-                } else {
-                    val target = (positionMs - 10_000L).coerceAtLeast(0L)
-                    seekWebVideo(webView, target)
-                    positionMs = target
+            onDoubleTap = { action ->
+                when (action) {
+                    PlayerDoubleTapAction.Rewind -> {
+                        val target = (positionMs - 10_000L).coerceAtLeast(0L)
+                        seekWebVideo(webView, target)
+                        positionMs = target
+                    }
+                    PlayerDoubleTapAction.TogglePlayback -> {
+                        DiagnosticsLog.event("EmbedWebView double tap playPause")
+                        webView?.evaluateJavascript(REMOTE_TOGGLE_PLAYBACK_JS, null)
+                        webIsPlaying = !webIsPlaying
+                        playbackGestureIsPlaying = webIsPlaying
+                    }
+                    PlayerDoubleTapAction.Forward -> {
+                        seekWebVideo(webView, positionMs + 10_000L)
+                        positionMs += 10_000L
+                    }
                 }
             },
             onHoldSpeed = { active ->
@@ -766,6 +783,10 @@ fun EmbedWebView(
                 onFullscreen = onToggleFullscreen,
                 onInteract = { touchControlsInteraction++ },
             )
+        }
+
+        playbackGestureIsPlaying?.let { isPlaying ->
+            PlaybackGestureIndicator(isPlaying, Modifier.align(Alignment.Center))
         }
 
         if (settingsSheetVisible) {

@@ -27,6 +27,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +41,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +74,8 @@ private sealed interface GestureLevel {
 
 private enum class GestureZone { Brightness, Volume }
 
+internal enum class PlayerDoubleTapAction { Rewind, TogglePlayback, Forward }
+
 // Vertical drags are only picked up inside these edge strips, so a swipe across the middle of the
 // picture leaves brightness and volume alone. Sizing them by share of the width keeps them within
 // thumb reach on a phone held in portrait; the clamp stops them swallowing a landscape screen.
@@ -93,7 +98,7 @@ private val GESTURE_EDGE_MAX = 160.dp
 internal fun PlayerGestureControls(
     modifier: Modifier = Modifier,
     onTap: (() -> Unit)? = null,
-    onDoubleTap: ((isRightHalf: Boolean) -> Unit)? = null,
+    onDoubleTap: ((PlayerDoubleTapAction) -> Unit)? = null,
     onHoldSpeed: ((active: Boolean) -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -101,6 +106,9 @@ internal fun PlayerGestureControls(
     val audioManager = remember(context) {
         context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     }
+    val currentOnTap by rememberUpdatedState(onTap)
+    val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
+    val currentOnHoldSpeed by rememberUpdatedState(onHoldSpeed)
 
     var level by remember { mutableStateOf<GestureLevel?>(null) }
     var levelTick by remember { mutableIntStateOf(0) }
@@ -141,7 +149,7 @@ internal fun PlayerGestureControls(
                         val holdDeadline = down.uptimeMillis + viewConfiguration.longPressTimeoutMillis
 
                         while (true) {
-                            val event = if (!dragging && !holding && onHoldSpeed != null) {
+                            val event = if (!dragging && !holding && currentOnHoldSpeed != null) {
                                 val remaining = holdDeadline - android.os.SystemClock.uptimeMillis()
                                 if (remaining <= 0) {
                                     null
@@ -156,7 +164,7 @@ internal fun PlayerGestureControls(
                                 // while held, like YouTube's hold-for-2x.
                                 holding = true
                                 holdSpeedActive = true
-                                onHoldSpeed?.invoke(true)
+                                currentOnHoldSpeed?.invoke(true)
                                 continue
                             }
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
@@ -194,14 +202,14 @@ internal fun PlayerGestureControls(
 
                         if (holding) {
                             holdSpeedActive = false
-                            onHoldSpeed?.invoke(false)
+                            currentOnHoldSpeed?.invoke(false)
                             up?.consume()
                             return@awaitEachGesture
                         }
                         if (dragging || up == null) return@awaitEachGesture
                         up.consume()
-                        if (onDoubleTap == null) {
-                            onTap?.invoke()
+                        if (currentOnDoubleTap == null) {
+                            currentOnTap?.invoke()
                             return@awaitEachGesture
                         }
                         // Wait one double-tap window for a second press before committing to a
@@ -210,16 +218,20 @@ internal fun PlayerGestureControls(
                             awaitFirstDown(requireUnconsumed = false)
                         }
                         if (secondDown == null) {
-                            onTap?.invoke()
+                            currentOnTap?.invoke()
                         } else {
                             secondDown.consume()
-                            onDoubleTap(secondDown.position.x >= size.width / 2f)
+                            val action = playerDoubleTapAction(
+                                x = secondDown.position.x,
+                                width = size.width.toFloat(),
+                            )
                             while (true) {
                                 val e = awaitPointerEvent()
                                 val c = e.changes.firstOrNull { it.id == secondDown.id } ?: break
                                 c.consume()
                                 if (!c.pressed) break
                             }
+                            currentOnDoubleTap?.invoke(action)
                         }
                     }
                 },
@@ -248,6 +260,34 @@ internal fun PlayerGestureControls(
                 )
             }
         }
+    }
+}
+
+/** Outer thirds retain seek gestures; the center third toggles playback. */
+internal fun playerDoubleTapAction(x: Float, width: Float): PlayerDoubleTapAction {
+    if (width <= 0f) return PlayerDoubleTapAction.TogglePlayback
+    val fraction = (x / width).coerceIn(0f, 1f)
+    return when {
+        fraction < 1f / 3f -> PlayerDoubleTapAction.Rewind
+        fraction > 2f / 3f -> PlayerDoubleTapAction.Forward
+        else -> PlayerDoubleTapAction.TogglePlayback
+    }
+}
+
+@Composable
+internal fun PlaybackGestureIndicator(isPlaying: Boolean, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(76.dp)
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(38.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (isPlaying) Icons.Default.PlayArrow else Icons.Default.Pause,
+            contentDescription = if (isPlaying) "Playing" else "Paused",
+            tint = Color.White,
+            modifier = Modifier.size(38.dp),
+        )
     }
 }
 
