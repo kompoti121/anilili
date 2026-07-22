@@ -171,6 +171,9 @@ object SettingsStore {
         editCaptionStyle { it.copy(backgroundColor = value) }
     fun setCaptionTextScale(percent: Int) =
         editCaptionStyle { it.copy(textScalePercent = percent.coerceIn(CaptionStyle.MIN_TEXT_SCALE_PERCENT, CaptionStyle.MAX_TEXT_SCALE_PERCENT)) }
+    fun setCaptionBold(value: Boolean) = editCaptionStyle { it.copy(boldText = value) }
+    fun setCaptionBottomMargin(percent: Int) =
+        editCaptionStyle { it.copy(bottomMarginPercent = percent.coerceIn(CaptionStyle.MIN_BOTTOM_MARGIN_PERCENT, CaptionStyle.MAX_BOTTOM_MARGIN_PERCENT)) }
     fun setCaptionTextColor(value: CaptionTextColor) = editCaptionStyle { it.copy(textColor = value) }
     fun setCaptionEdgeStyle(value: CaptionEdgeStyle) = editCaptionStyle { it.copy(edgeStyle = value) }
     fun resetCaptionStyle() = editCaptionStyle { CaptionStyle() }
@@ -213,6 +216,8 @@ object SettingsStore {
                 prefs[CAPTION_BACKGROUND_OPACITY] = next.backgroundOpacityPercent
                 prefs[CAPTION_BACKGROUND_COLOR] = next.backgroundColor.storedValue
                 prefs[CAPTION_TEXT_SCALE] = next.textScalePercent
+                prefs[CAPTION_BOLD_TEXT] = next.boldText
+                prefs[CAPTION_BOTTOM_MARGIN] = next.bottomMarginPercent
                 prefs[CAPTION_TEXT_COLOR] = next.textColor.storedValue
                 prefs[CAPTION_EDGE_STYLE] = next.edgeStyle.storedValue
             }
@@ -225,6 +230,9 @@ object SettingsStore {
         backgroundColor = CaptionBackgroundColor.fromStored(prefs[CAPTION_BACKGROUND_COLOR]),
         textScalePercent = prefs[CAPTION_TEXT_SCALE]?.coerceIn(CaptionStyle.MIN_TEXT_SCALE_PERCENT, CaptionStyle.MAX_TEXT_SCALE_PERCENT)
             ?: CaptionStyle.DEFAULT_TEXT_SCALE_PERCENT,
+        boldText = prefs[CAPTION_BOLD_TEXT] ?: CaptionStyle.DEFAULT_BOLD_TEXT,
+        bottomMarginPercent = prefs[CAPTION_BOTTOM_MARGIN]?.coerceIn(CaptionStyle.MIN_BOTTOM_MARGIN_PERCENT, CaptionStyle.MAX_BOTTOM_MARGIN_PERCENT)
+            ?: CaptionStyle.DEFAULT_BOTTOM_MARGIN_PERCENT,
         textColor = CaptionTextColor.fromStored(prefs[CAPTION_TEXT_COLOR]),
         edgeStyle = CaptionEdgeStyle.fromStored(prefs[CAPTION_EDGE_STYLE]),
     )
@@ -277,6 +285,8 @@ object SettingsStore {
     private val CAPTION_BACKGROUND_OPACITY = intPreferencesKey("caption_background_opacity")
     private val CAPTION_BACKGROUND_COLOR = stringPreferencesKey("caption_background_color")
     private val CAPTION_TEXT_SCALE = intPreferencesKey("caption_text_scale")
+    private val CAPTION_BOLD_TEXT = booleanPreferencesKey("caption_bold_text")
+    private val CAPTION_BOTTOM_MARGIN = intPreferencesKey("caption_bottom_margin")
     private val CAPTION_TEXT_COLOR = stringPreferencesKey("caption_text_color")
     private val CAPTION_EDGE_STYLE = stringPreferencesKey("caption_edge_style")
     private val MENU_LANGUAGE = stringPreferencesKey("menu_language")

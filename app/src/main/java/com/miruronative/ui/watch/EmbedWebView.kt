@@ -1122,8 +1122,10 @@ internal fun captionCss(style: CaptionStyle): String {
         "background-color: $background !important; " +
         "color: ${style.textCssHex()} !important; " +
         "text-shadow: ${style.edgeStyle.toCssTextShadow()} !important; " +
-        "font-size: ${style.textScalePercent}% !important;"
-    return "::cue { $declarations }\n$DOM_CAPTION_SELECTORS { $declarations }"
+        "font-size: ${style.textScalePercent}% !important; " +
+        "font-weight: ${if (style.boldText) 700 else 400} !important;"
+    val domDeclarations = "$declarations bottom: ${style.bottomMarginPercent}% !important;"
+    return "::cue { $declarations }\n$DOM_CAPTION_SELECTORS { $domDeclarations }"
 }
 
 private const val DOM_CAPTION_SELECTORS =

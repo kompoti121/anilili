@@ -56,6 +56,17 @@ class CaptionCssTest {
     }
 
     @Test
+    fun `weight and bottom margin are emitted for web captions`() {
+        val bold = captionCss(CaptionStyle(boldText = true, bottomMarginPercent = 16))
+        val regular = captionCss(CaptionStyle(boldText = false, bottomMarginPercent = 4))
+
+        assertTrue(bold.contains("font-weight: 700 !important"))
+        assertTrue(bold.contains("bottom: 16% !important"))
+        assertTrue(regular.contains("font-weight: 400 !important"))
+        assertTrue(regular.contains("bottom: 4% !important"))
+    }
+
+    @Test
     fun `css carries no quote or backslash that would break the js string literal`() {
         CaptionTextColor.entries.forEach { text ->
             CaptionBackgroundColor.entries.forEach { background ->

@@ -1311,12 +1311,13 @@ private fun PlayerView.applyCaptionStyle(style: CaptionStyle) {
             android.graphics.Color.TRANSPARENT, // window: the box behind the whole line
             style.edgeStyle.toMedia3EdgeType(),
             android.graphics.Color.BLACK,
-            null,
+            if (style.boldText) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT,
         ),
     )
     view.setFractionalTextSize(
         SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * style.textScalePercent / 100f,
     )
+    view.setBottomPaddingFraction(style.bottomPaddingFraction)
 }
 
 @OptIn(UnstableApi::class)

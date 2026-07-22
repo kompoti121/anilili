@@ -78,6 +78,20 @@ fun CaptionAppearanceEditor(
             onSelect = SettingsStore::setCaptionTextScale,
         )
         CaptionChoiceRow(
+            label = "Text weight",
+            options = listOf(false, true),
+            selected = style.boldText,
+            labelOf = { if (it) "Bold" else "Regular" },
+            onSelect = SettingsStore::setCaptionBold,
+        )
+        CaptionChoiceRow(
+            label = "Bottom margin",
+            options = CaptionStyle.BOTTOM_MARGIN_STEPS,
+            selected = style.bottomMarginPercent,
+            labelOf = { "$it%" },
+            onSelect = SettingsStore::setCaptionBottomMargin,
+        )
+        CaptionChoiceRow(
             label = "Text color",
             options = CaptionTextColor.entries,
             selected = style.textColor,
@@ -138,8 +152,13 @@ private fun CaptionPreview(style: CaptionStyle, modifier: Modifier = Modifier) {
             .clip(RoundedCornerShape(8.dp))
             // Stands in for video: a flat swatch would hide what a translucent background does.
             .background(Brush.linearGradient(listOf(Color(0xFF3A4E6B), Color(0xFF0E1116))))
-            .padding(vertical = 20.dp, horizontal = 12.dp),
-        contentAlignment = Alignment.Center,
+            .heightIn(min = 120.dp)
+            .padding(
+                start = 12.dp,
+                end = 12.dp,
+                bottom = (style.bottomMarginPercent * 0.6f).dp,
+            ),
+        contentAlignment = Alignment.BottomCenter,
     ) {
         Box(
             Modifier
@@ -152,6 +171,7 @@ private fun CaptionPreview(style: CaptionStyle, modifier: Modifier = Modifier) {
                     PREVIEW_SAMPLE,
                     color = Color.Black,
                     fontSize = fontSize,
+                    fontWeight = if (style.boldText) FontWeight.Bold else FontWeight.Normal,
                     style = TextStyle(drawStyle = Stroke(width = 5f)),
                 )
             }
@@ -159,6 +179,7 @@ private fun CaptionPreview(style: CaptionStyle, modifier: Modifier = Modifier) {
                 PREVIEW_SAMPLE,
                 color = Color(style.textArgb),
                 fontSize = fontSize,
+                fontWeight = if (style.boldText) FontWeight.Bold else FontWeight.Normal,
                 style = if (style.edgeStyle == CaptionEdgeStyle.DROP_SHADOW) {
                     TextStyle(shadow = Shadow(Color.Black, Offset(2f, 2f), blurRadius = 4f))
                 } else {

@@ -5,9 +5,12 @@ import android.content.SharedPreferences
 import com.miruronative.data.reminder.ReleaseSyncScheduler
 import com.miruronative.data.AppGraph
 import com.miruronative.data.auth.AccountService
+import com.miruronative.data.auth.AuthManager
+import com.miruronative.data.model.MediaListEntry
 import com.miruronative.data.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,13 +26,17 @@ import kotlinx.serialization.json.Json
 object LibraryStore {
     private const val KEY_HISTORY = "history"
     private const val KEY_WATCHLIST = "watchlist"
+    private const val KEY_REMOTE_STATUSES = "remote_statuses"
     private const val MAX_HISTORY = 100
+    private const val REMOTE_REFRESH_INTERVAL_MS = 30_000L
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private lateinit var prefs: SharedPreferences
     private lateinit var appContext: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val aniListSyncMutex = Mutex()
+    private var remoteRefreshJob: Job? = null
+    @Volatile private var lastRemoteRefreshAt = 0L
 
     private val _history = MutableStateFlow<List<HistoryEntry>>(emptyList())
     val history = _history.asStateFlow()
@@ -37,11 +44,18 @@ object LibraryStore {
     private val _watchlist = MutableStateFlow<List<WatchlistEntry>>(emptyList())
     val watchlist = _watchlist.asStateFlow()
 
+    private val _remoteStatuses = MutableStateFlow<Map<Int, String>>(emptyMap())
+    val remoteStatuses = _remoteStatuses.asStateFlow()
+
     fun init(context: Context) {
         appContext = context.applicationContext
         prefs = appContext.getSharedPreferences("miruro_library", Context.MODE_PRIVATE)
         _history.value = decodeList(prefs.getString(KEY_HISTORY, null), HistoryEntry.serializer())
         _watchlist.value = decodeList(prefs.getString(KEY_WATCHLIST, null), WatchlistEntry.serializer())
+        _remoteStatuses.value = decodeList(
+            prefs.getString(KEY_REMOTE_STATUSES, null),
+            RemoteListStatus.serializer(),
+        ).associate { it.anilistId to it.status }
     }
 
     // ---- history ----
@@ -100,6 +114,8 @@ object LibraryStore {
                             AccountService.ANILIST -> AppGraph.repository.syncSavedAnime(entry.anilistId, saved)
                             AccountService.MAL -> AppGraph.repository.malSyncSavedAnime(entry.anilistId, saved)
                         }
+                    }.onSuccess {
+                        refreshRemoteLibrary(force = true)
                     }.onFailure {
                         com.miruronative.diagnostics.DiagnosticsLog.throwable(
                             "${service.label} saved sync failed id=${entry.anilistId} saved=$saved",
@@ -123,6 +139,8 @@ object LibraryStore {
                         AccountService.ANILIST -> AppGraph.repository.syncSavedAnime(savedIds)
                         AccountService.MAL -> AppGraph.repository.malSyncSavedAnime(savedIds)
                     }
+                }.onSuccess {
+                    refreshRemoteLibrary(force = true)
                 }.onFailure {
                     com.miruronative.diagnostics.DiagnosticsLog.throwable(
                         "${service.label} watchlist sync failed (${savedIds.size} titles)",
@@ -140,6 +158,102 @@ object LibraryStore {
         _watchlist.value = merged
         persist(KEY_WATCHLIST, merged, WatchlistEntry.serializer())
         ReleaseSyncScheduler.runNow(appContext)
+    }
+
+    /**
+     * Publish a freshly fetched remote collection to every screen immediately. Unlike the local
+     * watchlist, this includes every list state so Detail can distinguish Watching, Completed,
+     * Paused, and Dropped from a title that truly is not tracked.
+     */
+    fun hydrateRemoteLibrary(entries: List<MediaListEntry>) {
+        val statuses = remoteListStatuses(entries)
+        _remoteStatuses.value = statuses
+        persist(
+            KEY_REMOTE_STATUSES,
+            statuses.map { (id, status) -> RemoteListStatus(id, status) },
+            RemoteListStatus.serializer(),
+        )
+        lastRemoteRefreshAt = System.currentTimeMillis()
+
+        if (SettingsStore.syncSavedToAniList.value) {
+            hydrateWatchlistFromAniList(
+                entries.mapNotNull { entry ->
+                    if (entry.status != "PLANNING") return@mapNotNull null
+                    val media = entry.media ?: return@mapNotNull null
+                    WatchlistEntry(
+                        anilistId = media.id,
+                        title = media.title.preferred,
+                        cover = media.coverImage.best,
+                        format = media.format,
+                        averageScore = media.averageScore,
+                    )
+                },
+            )
+        }
+    }
+
+    /** Update the snapshot synchronously after playback changes an AniList/MAL list state. */
+    fun updateRemoteStatus(anilistId: Int, status: String?) {
+        val normalized = status?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
+        val updated = _remoteStatuses.value.toMutableMap().apply {
+            if (normalized == null) remove(anilistId) else put(anilistId, normalized)
+        }
+        _remoteStatuses.value = updated
+        persist(
+            KEY_REMOTE_STATUSES,
+            updated.map { (id, value) -> RemoteListStatus(id, value) },
+            RemoteListStatus.serializer(),
+        )
+    }
+
+    /** Refresh on cold start/foreground, while bounding AniList's shared API rate limit. */
+    @Synchronized
+    fun refreshRemoteLibrary(force: Boolean = false) {
+        val service = AccountService.active
+        if (service == null) {
+            if (_remoteStatuses.value.isNotEmpty()) clearRemoteLibrary()
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (remoteRefreshJob?.isActive == true) return
+        if (!force && now - lastRemoteRefreshAt < REMOTE_REFRESH_INTERVAL_MS) return
+        lastRemoteRefreshAt = now
+        remoteRefreshJob = scope.launch {
+            runCatching {
+                aniListSyncMutex.withLock {
+                    val entries = when (service) {
+                        AccountService.ANILIST -> {
+                            val viewerId = AuthManager.viewerId() ?: AppGraph.repository.viewer()?.id
+                                ?: error("Couldn't load your AniList account")
+                            val collection = AppGraph.repository.userAnimeList(viewerId)
+                                ?: error("Couldn't load your AniList library")
+                            collection.lists
+                                .flatMap { it.entries }
+                                .distinctBy { it.id }
+                        }
+                        AccountService.MAL -> AppGraph.repository.malAnimeList()
+                    }
+                    hydrateRemoteLibrary(entries)
+                    com.miruronative.diagnostics.DiagnosticsLog.event(
+                        "${service.label} library refreshed statuses=${_remoteStatuses.value.size}",
+                    )
+                }
+            }.onFailure {
+                lastRemoteRefreshAt = 0L
+                com.miruronative.diagnostics.DiagnosticsLog.throwable(
+                    "${service.label} library refresh failed",
+                    it,
+                )
+            }
+        }
+    }
+
+    fun clearRemoteLibrary() {
+        remoteRefreshJob?.cancel()
+        remoteRefreshJob = null
+        lastRemoteRefreshAt = 0L
+        _remoteStatuses.value = emptyMap()
+        prefs.edit().remove(KEY_REMOTE_STATUSES).apply()
     }
 
     // ---- persistence ----

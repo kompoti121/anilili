@@ -96,6 +96,8 @@ fun SearchScreen(
     modifier: Modifier = Modifier,
     vm: SearchViewModel = viewModel(),
     tvFieldFocusRequester: FocusRequester? = null,
+    initialStudioId: Int? = null,
+    initialStudioName: String? = null,
 ) {
     val state by vm.state.collectAsState()
     val isRefreshing by vm.isRefreshing.collectAsState()
@@ -109,6 +111,12 @@ fun SearchScreen(
     // bar pinned so D-pad focus can always return to the search field.
     val scrollingUp = gridState.isScrollingUp()
     val topBarVisible = device.isTv || scrollingUp
+
+    LaunchedEffect(initialStudioId, initialStudioName) {
+        val studioId = initialStudioId ?: return@LaunchedEffect
+        val studioName = initialStudioName ?: return@LaunchedEffect
+        vm.applyStudioFilter(studioId, studioName)
+    }
 
     Column(
         modifier
@@ -349,7 +357,11 @@ private fun ResultsGrid(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        if (filters.query.isBlank()) "Discover anime" else "Results for “${filters.query}”",
+                        when {
+                            filters.query.isNotBlank() -> "Results for “${filters.query}”"
+                            !filters.studioName.isNullOrBlank() -> "Anime by ${filters.studioName}"
+                            else -> "Discover anime"
+                        },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f),
@@ -432,6 +444,10 @@ private fun FilterSheet(
     vm: SearchViewModel,
     onDismiss: () -> Unit,
 ) {
+    val studioSuggestions by vm.studioSuggestions.collectAsState()
+    val studioLookupLoading by vm.isStudioLookupLoading.collectAsState()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     var tagSearch by remember { mutableStateOf("") }
     val visibleTags = remember(options.tags, tagSearch) {
         options.tags
@@ -460,6 +476,61 @@ private fun FilterSheet(
                 }
             }
             item { FilterSection("Sort by") { ChoiceFlow(SearchViewModel.SORTS, filters.sort, vm::setSort) } }
+            item {
+                FilterSection("Studio") {
+                    TvDeferredTextField(Modifier.fillMaxWidth()) { fieldModifier ->
+                        OutlinedTextField(
+                            value = vm.studioQuery,
+                            onValueChange = vm::onStudioQueryChange,
+                            modifier = fieldModifier.fillMaxWidth().tvEscapeDown(),
+                            placeholder = { Text("Find a studio (for example MAPPA)") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            trailingIcon = {
+                                when {
+                                    studioLookupLoading -> CircularProgressIndicator(
+                                        modifier = Modifier.size(22.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                    vm.studioQuery.isNotEmpty() -> IconButton(onClick = vm::clearStudio) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear studio")
+                                    }
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                vm.selectFirstStudioSuggestion()
+                                keyboard?.hide()
+                                focusManager.moveFocus(FocusDirection.Down)
+                            }),
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                        )
+                    }
+                    if (studioSuggestions.isNotEmpty()) {
+                        FlowRow(
+                            modifier = Modifier.padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            studioSuggestions.forEach { studio ->
+                                val name = studio.name ?: return@forEach
+                                FilterChip(
+                                    selected = filters.studioId == studio.id,
+                                    onClick = { vm.selectStudio(studio) },
+                                    label = { Text(name) },
+                                    modifier = Modifier.focusHighlight(RoundedCornerShape(8.dp)),
+                                )
+                            }
+                        }
+                    } else if (filters.studioId != null && !filters.studioName.isNullOrBlank()) {
+                        Text(
+                            "Filtering by ${filters.studioName}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                }
+            }
             item {
                 FilterSection("Release year") {
                     TvDeferredTextField(Modifier.fillMaxWidth()) { fieldModifier ->

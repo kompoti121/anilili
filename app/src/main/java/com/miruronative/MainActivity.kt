@@ -199,6 +199,7 @@ class MainActivity : FragmentActivity() {
         super.onStart()
         DiagnosticsLog.event("MainActivity.onStart")
         PlaybackService.allowMediaButtonResume()
+        LibraryStore.refreshRemoteLibrary()
     }
 
     override fun onResume() {
@@ -230,6 +231,7 @@ class MainActivity : FragmentActivity() {
         AuthManager.extractToken(url)?.let { token ->
             AuthManager.setToken(token)
             LibraryStore.syncSavedToRemote()
+            LibraryStore.refreshRemoteLibrary(force = true)
             pendingRoute = Routes.MORE
             DiagnosticsLog.event("Auth redirect accepted")
         }
@@ -311,7 +313,7 @@ private fun MiruroRoot(
     val deviceProfile = rememberAppDeviceProfile()
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
-    val currentRoute = backStack?.destination?.route
+    val currentRoute = Routes.tabRoute(backStack?.destination?.route)
     val showBottomBar = currentRoute in Routes.tabRoutes
     val menuLanguage by SettingsStore.menuLanguage.collectAsState()
     var resolverWebViewsReady by remember { mutableStateOf(false) }
@@ -611,11 +613,26 @@ private fun AppNavHost(
                     onAnimeClick = { id -> nav.navigate(Routes.detail(id)) },
                 )
             }
-            composable(Routes.SEARCH) {
+            composable(
+                route = Routes.SEARCH_DESTINATION,
+                arguments = listOf(
+                    navArgument(Routes.Arg.STUDIO_ID) {
+                        type = NavType.IntType
+                        defaultValue = -1
+                    },
+                    navArgument(Routes.Arg.STUDIO_NAME) {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
+            ) { entry ->
                 LaunchedEffect(Unit) { DiagnosticsLog.event("Route SEARCH content entered") }
                 SearchScreen(
                     onAnimeClick = { id -> nav.navigate(Routes.detail(id)) },
                     tvFieldFocusRequester = tvSearchFieldFocusRequester,
+                    initialStudioId = entry.arguments?.getInt(Routes.Arg.STUDIO_ID)?.takeIf { it > 0 },
+                    initialStudioName = entry.arguments?.getString(Routes.Arg.STUDIO_NAME),
                 )
             }
             composable(Routes.SCHEDULE) {
@@ -648,6 +665,12 @@ private fun AppNavHost(
                     onBack = { nav.popBackStack() },
                     onAnimeClick = { relatedId ->
                         if (relatedId != id) nav.navigate(Routes.detail(relatedId))
+                    },
+                    onStudioClick = { studio ->
+                        val name = studio.name
+                        if (studio.id > 0 && !name.isNullOrBlank()) {
+                            nav.navigate(Routes.studioSearch(studio.id, name)) { launchSingleTop = true }
+                        }
                     },
                     onPlay = { playId, provider, category, episode ->
                         // TV: Watch lands on the episode grid (playback starts inline) so the
@@ -711,9 +734,10 @@ private fun AppNavHost(
 }
 
 private fun NavController.navigateTab(route: String) {
+    val restoreTabState = Routes.shouldRestoreTabState(route)
     navigate(route) {
-        popUpTo(graph.startDestinationId) { saveState = true }
+        popUpTo(graph.startDestinationId) { saveState = restoreTabState }
         launchSingleTop = true
-        restoreState = true
+        restoreState = restoreTabState
     }
 }

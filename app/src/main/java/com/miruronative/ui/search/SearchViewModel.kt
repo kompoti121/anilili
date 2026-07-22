@@ -9,6 +9,7 @@ import com.miruronative.data.AppGraph
 import com.miruronative.data.model.DiscoverFilters
 import com.miruronative.data.model.DiscoverOptions
 import com.miruronative.data.model.Media
+import com.miruronative.data.model.StudioNode
 import com.miruronative.ui.UiState
 import com.miruronative.ui.rethrowIfCancellation
 import kotlinx.coroutines.Job
@@ -37,8 +38,16 @@ class SearchViewModel : ViewModel() {
     private val _options = MutableStateFlow(DiscoverOptions(genres = DEFAULT_GENRES))
     val options = _options.asStateFlow()
 
+    var studioQuery by mutableStateOf("")
+        private set
+    private val _studioSuggestions = MutableStateFlow<List<StudioNode>>(emptyList())
+    val studioSuggestions = _studioSuggestions.asStateFlow()
+    private val _isStudioLookupLoading = MutableStateFlow(false)
+    val isStudioLookupLoading = _isStudioLookupLoading.asStateFlow()
+
     private var searchJob: Job? = null
     private var loadMoreJob: Job? = null
+    private var studioLookupJob: Job? = null
     private var currentPage = 1
     private var hasNextPage = false
     private var requestGeneration = 0
@@ -71,8 +80,76 @@ class SearchViewModel : ViewModel() {
     fun setMinimumScore(value: Int?) = update(filters.copy(minimumScore = value))
     fun setSort(value: String) = update(filters.copy(sort = value))
 
-    fun clearFilters() = update(DiscoverFilters(query = filters.query))
-    fun clearAll() = update(DiscoverFilters())
+    fun onStudioQueryChange(value: String) {
+        studioQuery = value
+        if (filters.studioId != null && value.trim() != filters.studioName) {
+            update(filters.copy(studioId = null, studioName = null))
+        }
+        studioLookupJob?.cancel()
+        _studioSuggestions.value = emptyList()
+        _isStudioLookupLoading.value = false
+        val term = value.trim()
+        if (term.length < 2 || term == filters.studioName) return
+        studioLookupJob = viewModelScope.launch {
+            delay(250)
+            _isStudioLookupLoading.value = true
+            val matches = runCatching { repo.searchStudios(term) }.getOrElse {
+                it.rethrowIfCancellation()
+                emptyList()
+            }
+            if (studioQuery.trim() == term) _studioSuggestions.value = matches
+            _isStudioLookupLoading.value = false
+        }
+    }
+
+    fun selectStudio(studio: StudioNode) {
+        val name = studio.name?.trim().orEmpty()
+        if (studio.id <= 0 || name.isEmpty()) return
+        studioLookupJob?.cancel()
+        studioQuery = name
+        _studioSuggestions.value = emptyList()
+        _isStudioLookupLoading.value = false
+        update(filters.copy(studioId = studio.id, studioName = name), delayMs = 0)
+    }
+
+    fun selectFirstStudioSuggestion() {
+        _studioSuggestions.value.firstOrNull()?.let(::selectStudio)
+    }
+
+    fun clearStudio() {
+        studioLookupJob?.cancel()
+        studioQuery = ""
+        _studioSuggestions.value = emptyList()
+        _isStudioLookupLoading.value = false
+        update(filters.copy(studioId = null, studioName = null), delayMs = 0)
+    }
+
+    /** Applies an exact studio received from a detail-page navigation route. */
+    fun applyStudioFilter(studioId: Int, studioName: String) {
+        val name = studioName.trim()
+        if (studioId <= 0 || name.isEmpty()) return
+        if (filters.studioId == studioId && filters.studioName == name) {
+            studioQuery = name
+            return
+        }
+        selectStudio(StudioNode(id = studioId, name = name, isAnimationStudio = true))
+    }
+
+    fun clearFilters() {
+        studioLookupJob?.cancel()
+        studioQuery = ""
+        _studioSuggestions.value = emptyList()
+        _isStudioLookupLoading.value = false
+        update(DiscoverFilters(query = filters.query))
+    }
+
+    fun clearAll() {
+        studioLookupJob?.cancel()
+        studioQuery = ""
+        _studioSuggestions.value = emptyList()
+        _isStudioLookupLoading.value = false
+        update(DiscoverFilters())
+    }
     fun retry() = submit(delayMs = 0)
     fun refresh() = submit(delayMs = 0, force = true)
 

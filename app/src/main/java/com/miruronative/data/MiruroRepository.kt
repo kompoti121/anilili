@@ -7,6 +7,7 @@ import com.miruronative.data.model.EpisodesResult
 import com.miruronative.data.model.DiscoverFilters
 import com.miruronative.data.model.Media
 import com.miruronative.data.model.MediaPage
+import com.miruronative.data.model.StudioNode
 import com.miruronative.data.model.HomeCollections
 import com.miruronative.data.model.SourcesResult
 import com.miruronative.data.cache.AppCache
@@ -27,10 +28,12 @@ import com.miruronative.data.remote.KonohaClient
 import com.miruronative.data.remote.KonohaEpisode
 import com.miruronative.data.remote.MalClient
 import com.miruronative.data.remote.MediaListProgressSnapshot
+import com.miruronative.data.remote.MediaListProgressUpdate
 import com.miruronative.data.remote.PipeClient
 import com.miruronative.data.remote.planMediaListProgressUpdate
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.diagnostics.DiagnosticsLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -38,6 +41,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.SetSerializer
 import kotlinx.serialization.builtins.nullable
@@ -60,6 +64,75 @@ internal fun providerAttemptOrder(preferred: String, providerNames: List<String>
             sameSource.getOrNull(index)?.let(::add)
         }
     }
+}
+
+internal data class ProviderSourceCandidate(
+    val provider: String,
+    val pipeId: String,
+)
+
+internal data class ProviderSourceResult(
+    val sources: SourcesResult,
+    val provider: String,
+)
+
+internal data class ProviderCandidateResolution(
+    val resolved: ProviderSourceResult?,
+    val unavailableProviders: Set<String>,
+)
+
+/**
+ * Runs source providers in preference order without allowing one dead host to stop fallback.
+ * The loader must cooperate with cancellation; Anivexa's HTTP bridge does so by cancelling the
+ * underlying OkHttp call, while its legacy synchronous providers also have a short call timeout.
+ */
+internal suspend fun resolveProviderCandidates(
+    candidates: List<ProviderSourceCandidate>,
+    excludedProviders: Set<String>,
+    maxAttempts: Int,
+    attemptTimeoutMs: Long,
+    onAttempt: (String) -> Unit = {},
+    onFailure: (String, Exception) -> Unit = { _, _ -> },
+    onTimeout: (String) -> Unit = {},
+    onEmpty: (String) -> Unit = {},
+    load: suspend (ProviderSourceCandidate) -> SourcesResult,
+): ProviderCandidateResolution {
+    require(maxAttempts >= 0) { "maxAttempts must not be negative" }
+    require(attemptTimeoutMs > 0L) { "attemptTimeoutMs must be positive" }
+
+    val unavailable = linkedSetOf<String>()
+    var attempts = 0
+    for (candidate in candidates) {
+        if (attempts >= maxAttempts) break
+        if (candidate.provider in excludedProviders) continue
+        attempts++
+        onAttempt(candidate.provider)
+
+        val result = try {
+            withTimeoutOrNull(attemptTimeoutMs) { load(candidate) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            unavailable += candidate.provider
+            onFailure(candidate.provider, e)
+            continue
+        }
+        if (result == null) {
+            unavailable += candidate.provider
+            onTimeout(candidate.provider)
+            continue
+        }
+
+        if (result.streams.isNotEmpty()) {
+            return ProviderCandidateResolution(
+                resolved = ProviderSourceResult(result, candidate.provider),
+                unavailableProviders = unavailable,
+            )
+        }
+        unavailable += candidate.provider
+        onEmpty(candidate.provider)
+    }
+    return ProviderCandidateResolution(resolved = null, unavailableProviders = unavailable)
 }
 
 /**
@@ -174,6 +247,8 @@ class MiruroRepository(
 
     suspend fun discover(filters: DiscoverFilters, page: Int = 1, force: Boolean = false): MediaPage =
         mediaPage("discover:${filters.cacheKey()}:$page", COLLECTION_TTL, force) { aniList.discover(filters, page, hideAdult = hideAdult) }
+
+    suspend fun searchStudios(query: String): List<StudioNode> = aniList.searchStudios(query)
 
     suspend fun discoverOptions(): DiscoverOptions {
         val adultHidden = hideAdult
@@ -333,14 +408,19 @@ class MiruroRepository(
     }
 
     /** Update MAL watched progress with the same non-regression policy as the AniList sync. */
-    suspend fun saveMalProgress(anilistId: Int, progress: Int, totalEpisodes: Int?) {
+    suspend fun saveMalProgress(
+        anilistId: Int,
+        progress: Int,
+        totalEpisodes: Int?,
+    ): MediaListProgressUpdate? {
         val media = animeInfo(anilistId)
-        val malId = media?.idMal?.takeIf { it > 0 } ?: return
+        val malId = media?.idMal?.takeIf { it > 0 } ?: return null
         val current = mal.listStatus(malId)?.let {
             MediaListProgressSnapshot(id = malId, status = MalClient.anilistStatus(it), progress = it.numEpisodesWatched)
         }
-        val update = planMediaListProgressUpdate(current, progress, totalEpisodes ?: media.episodes) ?: return
+        val update = planMediaListProgressUpdate(current, progress, totalEpisodes ?: media.episodes) ?: return null
         mal.updateListStatus(malId, progress = update.progress, status = update.status?.let(MalClient::malStatus))
+        return update
     }
 
     /** MAL filler episode numbers via Jikan; cached a week, empty on failure or no MAL id. */
@@ -365,7 +445,7 @@ class MiruroRepository(
     }
 
     suspend fun animeInfo(id: Int, force: Boolean = false): Media? = cache.getOrFetch(
-        key = "anime:v3:$id",
+        key = "anime:v4:$id",
         serializer = Media.serializer().nullable,
         ttlMs = INFO_TTL,
         forceRefresh = force,
@@ -504,7 +584,12 @@ class MiruroRepository(
             serializer = EpisodesResult.serializer(),
             ttlMs = EPISODES_TTL,
         ) {
-            anivexa.getEpisodes(anilistId, seed, providers).also {
+            anivexa.getEpisodes(
+                anilistId = anilistId,
+                seedMedia = seed,
+                providers = providers,
+                providerTimeoutMs = FAST_CATALOG_PROVIDER_TIMEOUT_MS,
+            ).also {
                 check(!it.isEmpty) { "Fast providers returned no episodes" }
             }
         }.withFillerMarks(anilistId)
@@ -569,37 +654,47 @@ class MiruroRepository(
         maxAttempts: Int = 5,
     ): SourceResolution {
         val ordered = providerAttemptOrder(preferred, episodes.providerNames)
-        val unavailable = linkedSetOf<String>()
-
-        var attempts = 0
-        for (name in ordered) {
-            if (attempts >= maxAttempts) break
-            if (name in excludedProviders) continue
-            val provider = episodes.provider(name) ?: continue
-            val ep = provider.episodes(category).firstOrNull { it.number == number } ?: continue
-            attempts++
-            val result = runCatching { sources(ep.pipeId, name, category, anilistId) }
-                .onFailure {
-                    DiagnosticsLog.throwable(
-                        "Source resolve failed provider=$name id=$anilistId episode=$number",
-                        it,
-                    )
-                }
-                .getOrNull()
-            if (result != null && result.streams.isNotEmpty()) {
-                return SourceResolution(
-                    resolved = ResolvedSources(result, name),
-                    unavailableProviders = unavailable,
-                )
-            }
-            unavailable += name
-            if (result != null) {
-                DiagnosticsLog.event(
-                    "Source resolve empty provider=$name id=$anilistId episode=$number",
-                )
-            }
+        val candidates = ordered.mapNotNull { name ->
+            val provider = episodes.provider(name) ?: return@mapNotNull null
+            val episode = provider.episodes(category).firstOrNull { it.number == number }
+                ?: return@mapNotNull null
+            ProviderSourceCandidate(name, episode.pipeId)
         }
-        return SourceResolution(resolved = null, unavailableProviders = unavailable)
+        val resolution = resolveProviderCandidates(
+            candidates = candidates,
+            excludedProviders = excludedProviders,
+            maxAttempts = maxAttempts,
+            attemptTimeoutMs = PROVIDER_SOURCE_ATTEMPT_TIMEOUT_MS,
+            onAttempt = { provider ->
+                DiagnosticsLog.event(
+                    "Source resolve attempt provider=$provider id=$anilistId episode=$number " +
+                        "timeoutMs=$PROVIDER_SOURCE_ATTEMPT_TIMEOUT_MS",
+                )
+            },
+            onFailure = { provider, error ->
+                DiagnosticsLog.throwable(
+                    "Source resolve failed provider=$provider id=$anilistId episode=$number",
+                    error,
+                )
+            },
+            onTimeout = { provider ->
+                DiagnosticsLog.event(
+                    "Source resolve timeout provider=$provider id=$anilistId episode=$number " +
+                        "afterMs=$PROVIDER_SOURCE_ATTEMPT_TIMEOUT_MS",
+                )
+            },
+            onEmpty = { provider ->
+                DiagnosticsLog.event(
+                    "Source resolve empty provider=$provider id=$anilistId episode=$number",
+                )
+            },
+        ) { candidate ->
+            sources(candidate.pipeId, candidate.provider, category, anilistId)
+        }
+        return SourceResolution(
+            resolved = resolution.resolved?.let { ResolvedSources(it.sources, it.provider) },
+            unavailableProviders = resolution.unavailableProviders,
+        )
     }
 
     private suspend fun mediaPage(
@@ -625,6 +720,7 @@ class MiruroRepository(
         query.trim().lowercase(),
         genres.sorted().joinToString(","),
         tags.sorted().joinToString(","),
+        studioId.orEmpty(),
         year.orEmpty(),
         status.orEmpty(),
         format.orEmpty(),
@@ -647,6 +743,8 @@ class MiruroRepository(
         const val COLLECTION_TTL = 4L * 60 * 60 * 1000
         const val EPISODES_TTL = 2L * 60 * 60 * 1000
         const val FILLER_FETCH_TIMEOUT_MS = 3_500L
+        const val FAST_CATALOG_PROVIDER_TIMEOUT_MS = 6_000L
+        const val PROVIDER_SOURCE_ATTEMPT_TIMEOUT_MS = 8_000L
         const val INFO_TTL = 24L * 60 * 60 * 1000
         const val OPTIONS_TTL = 7L * 24 * 60 * 60 * 1000
         const val SERIES_KEY_PREFIX = "series:v1:"

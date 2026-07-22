@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -70,9 +71,11 @@ import coil.compose.AsyncImage
 import com.miruronative.data.library.HistoryEntry
 import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.library.WatchlistEntry
+import com.miruronative.data.library.mediaListStatusLabel
 import com.miruronative.data.model.EpisodeItem
 import com.miruronative.data.model.FuzzyDate
 import com.miruronative.data.model.Media
+import com.miruronative.data.model.StudioNode
 import com.miruronative.data.settings.EpisodeLayout
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.diagnostics.DiagnosticsLog
@@ -109,6 +112,7 @@ fun DetailScreen(
     onBack: () -> Unit,
     onPlay: (animeId: Int, provider: String, category: String, episode: String) -> Unit,
     onAnimeClick: (Int) -> Unit,
+    onStudioClick: (StudioNode) -> Unit,
     onSeasonWatch: (Int) -> Unit,
     vm: DetailViewModel = viewModel(),
 ) {
@@ -117,6 +121,7 @@ fun DetailScreen(
     val isRefreshing by vm.isRefreshing.collectAsState()
     val watchlist by LibraryStore.watchlist.collectAsState()
     val history by LibraryStore.history.collectAsState()
+    val remoteStatuses by LibraryStore.remoteStatuses.collectAsState()
     val backFocusRequester = remember { FocusRequester() }
     val primaryActionFocusRequester = remember { FocusRequester() }
     val detailActionsReady = state is UiState.Success
@@ -172,6 +177,7 @@ fun DetailScreen(
             is UiState.Success -> {
                 val info = s.data.info
                 val saved = watchlist.any { it.anilistId == info.id }
+                val listStatusLabel = mediaListStatusLabel(remoteStatuses[info.id])
                 PullRefreshContainer(
                     isRefreshing = isRefreshing,
                     onRefresh = { vm.refresh(animeId) },
@@ -181,6 +187,7 @@ fun DetailScreen(
                         contentPadding = padding,
                         data = s.data,
                         saved = saved,
+                        listStatusLabel = listStatusLabel,
                         resume = history.firstOrNull { it.anilistId == animeId },
                         history = history,
                         onToggleSaved = {
@@ -196,6 +203,7 @@ fun DetailScreen(
                         },
                         onPlay = onPlay,
                         onAnimeClick = onAnimeClick,
+                        onStudioClick = onStudioClick,
                         onSeasonWatch = onSeasonWatch,
                         onSelectSeason = vm::selectSeason,
                         backFocusRequester = backFocusRequester,
@@ -213,11 +221,13 @@ fun DetailScreen(
 private fun DetailContent(
     data: DetailData,
     saved: Boolean,
+    listStatusLabel: String?,
     resume: HistoryEntry?,
     history: List<HistoryEntry> = emptyList(),
     onToggleSaved: () -> Unit,
     onPlay: (Int, String, String, String) -> Unit,
     onAnimeClick: (Int) -> Unit,
+    onStudioClick: (StudioNode) -> Unit,
     onSeasonWatch: (Int) -> Unit,
     onSelectSeason: (Int) -> Unit,
     backFocusRequester: FocusRequester,
@@ -263,10 +273,11 @@ private fun DetailContent(
             bottom = contentPadding.calculateBottomPadding() + 30.dp,
         ),
     ) {
-        item { DetailHero(info) }
+        item { DetailHero(info, onStudioClick) }
         item {
             DetailActions(
                 saved = saved,
+                listStatusLabel = listStatusLabel,
                 canWatch = primaryActionIsWatch,
                 resolving = false,
                 resume = resume,
@@ -414,7 +425,7 @@ private fun DetailContent(
 }
 
 @Composable
-private fun DetailHero(info: Media) {
+private fun DetailHero(info: Media, onStudioClick: (StudioNode) -> Unit) {
     val device = LocalAppDeviceProfile.current
     val banner = info.bannerImage ?: info.coverImage.best
     Box(Modifier.fillMaxWidth().height(if (device.isExpanded) 330.dp else 286.dp)) {
@@ -460,12 +471,14 @@ private fun DetailHero(info: Media) {
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
-                info.studios.nodes.firstOrNull { it.isAnimationStudio }?.name?.let { studio ->
-                    Text(
-                        text = studio,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 3.dp),
+                info.studios.nodes.firstOrNull { it.isAnimationStudio && !it.name.isNullOrBlank() }?.let { studio ->
+                    AssistChip(
+                        onClick = { onStudioClick(studio) },
+                        enabled = studio.id > 0,
+                        label = { Text(studio.name.orEmpty()) },
+                        modifier = Modifier
+                            .padding(top = 3.dp)
+                            .focusHighlight(RoundedCornerShape(8.dp)),
                     )
                 }
                 Text(
@@ -485,6 +498,7 @@ private fun DetailHero(info: Media) {
 @Composable
 private fun DetailActions(
     saved: Boolean,
+    listStatusLabel: String?,
     canWatch: Boolean,
     resolving: Boolean,
     resume: HistoryEntry?,
@@ -514,11 +528,14 @@ private fun DetailActions(
                 .focusHighlight(RoundedCornerShape(24.dp)),
         ) {
             Icon(
-                imageVector = if (saved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                imageVector = if (saved || listStatusLabel != null) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
             )
-            Text(if (saved) "In library" else "Add to list", Modifier.padding(start = 6.dp))
+            Text(
+                listStatusLabel ?: if (saved) "In library" else "Add to list",
+                Modifier.padding(start = 6.dp),
+            )
         }
         Button(
             onClick = onWatch,

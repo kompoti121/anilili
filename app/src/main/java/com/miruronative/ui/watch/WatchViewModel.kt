@@ -612,6 +612,9 @@ class WatchViewModel : ViewModel() {
                     AccountService.MAL -> repo.saveMalProgress(anilistId, episode, totalEpisodes)
                 }
             }
+                .onSuccess { update ->
+                    update?.status?.let { LibraryStore.updateRemoteStatus(anilistId, it) }
+                }
                 .onFailure {
                     syncedAniListEpisodes.remove(episode)
                     DiagnosticsLog.throwable(

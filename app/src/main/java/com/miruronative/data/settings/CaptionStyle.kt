@@ -12,6 +12,8 @@ data class CaptionStyle(
     val backgroundOpacityPercent: Int = DEFAULT_BACKGROUND_OPACITY_PERCENT,
     val backgroundColor: CaptionBackgroundColor = CaptionBackgroundColor.BLACK,
     val textScalePercent: Int = DEFAULT_TEXT_SCALE_PERCENT,
+    val boldText: Boolean = DEFAULT_BOLD_TEXT,
+    val bottomMarginPercent: Int = DEFAULT_BOTTOM_MARGIN_PERCENT,
     val textColor: CaptionTextColor = CaptionTextColor.WHITE,
     val edgeStyle: CaptionEdgeStyle = CaptionEdgeStyle.NONE,
 ) {
@@ -19,6 +21,9 @@ data class CaptionStyle(
     val backgroundArgb: Int get() = argbOf(backgroundColor.rgb, backgroundOpacityPercent)
 
     val textArgb: Int get() = argbOf(textColor.rgb, opacityPercent = 100)
+
+    /** Media3 expresses the safe-area gap as a fraction of the subtitle view's height. */
+    val bottomPaddingFraction: Float get() = bottomMarginPercent.coerceIn(0, 100) / 100f
 
     /** `rgba(...)` form of [backgroundArgb] for the WebView players' injected stylesheet. */
     fun backgroundCssRgba(): String {
@@ -33,6 +38,8 @@ data class CaptionStyle(
     companion object {
         const val DEFAULT_BACKGROUND_OPACITY_PERCENT = 60
         const val DEFAULT_TEXT_SCALE_PERCENT = 100
+        const val DEFAULT_BOLD_TEXT = true
+        const val DEFAULT_BOTTOM_MARGIN_PERCENT = 12
 
         /**
          * Discrete steps rather than a slider: the player menu has to be drivable by a TV remote,
@@ -40,9 +47,12 @@ data class CaptionStyle(
          */
         val BACKGROUND_OPACITY_STEPS = listOf(0, 25, 40, 60, 80, 100)
         val TEXT_SCALE_STEPS = listOf(75, 90, 100, 115, 130, 150, 200)
+        val BOTTOM_MARGIN_STEPS = listOf(4, 8, 12, 16, 20, 25)
 
         val MIN_TEXT_SCALE_PERCENT = TEXT_SCALE_STEPS.first()
         val MAX_TEXT_SCALE_PERCENT = TEXT_SCALE_STEPS.last()
+        val MIN_BOTTOM_MARGIN_PERCENT = BOTTOM_MARGIN_STEPS.first()
+        val MAX_BOTTOM_MARGIN_PERCENT = BOTTOM_MARGIN_STEPS.last()
 
         private fun argbOf(rgb: Int, opacityPercent: Int): Int {
             val alpha = opacityPercent.coerceIn(0, 100) * 255 / 100

@@ -1,5 +1,6 @@
 package com.miruronative.data.library
 
+import com.miruronative.data.model.MediaListEntry
 import kotlinx.serialization.Serializable
 
 /** One "continue watching" record per anime — the last episode watched + resume position. */
@@ -33,6 +34,31 @@ data class WatchlistEntry(
     val averageScore: Int? = null,
     val addedAt: Long = 0,
 )
+
+/** Persisted snapshot of a title's status on the signed-in list service. */
+@Serializable
+data class RemoteListStatus(
+    val anilistId: Int,
+    val status: String,
+)
+
+internal fun remoteListStatuses(entries: List<MediaListEntry>): Map<Int, String> = entries
+    .mapNotNull { entry ->
+        val id = entry.media?.id ?: return@mapNotNull null
+        val status = entry.status?.trim()?.uppercase()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+        id to status
+    }
+    .toMap()
+
+internal fun mediaListStatusLabel(status: String?): String? = when (status?.uppercase()) {
+    "CURRENT" -> "Watching"
+    "REPEATING" -> "Rewatching"
+    "PLANNING" -> "Plan to watch"
+    "PAUSED" -> "Paused"
+    "COMPLETED" -> "Completed"
+    "DROPPED" -> "Dropped"
+    else -> null
+}
 
 internal fun mergeWatchlistEntries(
     local: List<WatchlistEntry>,

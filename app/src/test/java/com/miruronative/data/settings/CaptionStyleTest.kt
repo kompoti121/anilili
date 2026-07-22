@@ -84,5 +84,15 @@ class CaptionStyleTest {
             CaptionStyle.DEFAULT_BACKGROUND_OPACITY_PERCENT in CaptionStyle.BACKGROUND_OPACITY_STEPS,
         )
         assertTrue(CaptionStyle.DEFAULT_TEXT_SCALE_PERCENT in CaptionStyle.TEXT_SCALE_STEPS)
+        assertTrue(CaptionStyle.DEFAULT_BOTTOM_MARGIN_PERCENT in CaptionStyle.BOTTOM_MARGIN_STEPS)
+    }
+
+    @Test
+    fun `captions default to bold and sit above media3's usual bottom padding`() {
+        val style = CaptionStyle()
+
+        assertTrue(style.boldText)
+        assertEquals(0.12f, style.bottomPaddingFraction)
+        assertTrue(style.bottomPaddingFraction > 0.08f)
     }
 }

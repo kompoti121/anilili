@@ -2,8 +2,11 @@ package com.miruronative.data
 
 import com.miruronative.data.library.HistoryEntry
 import com.miruronative.data.library.WatchlistEntry
+import com.miruronative.data.library.mediaListStatusLabel
 import com.miruronative.data.library.mergeWatchlistEntries
+import com.miruronative.data.library.remoteListStatuses
 import com.miruronative.data.model.Media
+import com.miruronative.data.model.MediaListEntry
 import com.miruronative.data.model.MediaRelationConnection
 import com.miruronative.data.model.MediaRelationEdge
 import com.miruronative.data.model.MediaTag
@@ -81,6 +84,22 @@ class CoreModelsTest {
         assertEquals("AniList title", merged.first().title)
         assertEquals(10, merged.first().addedAt)
         assertEquals(99, merged.last().addedAt)
+    }
+
+    @Test
+    fun remoteLibrarySnapshotKeepsEveryAniListStatusForDetailPages() {
+        val statuses = remoteListStatuses(
+            listOf(
+                MediaListEntry(status = "CURRENT", media = Media(id = 1)),
+                MediaListEntry(status = "PLANNING", media = Media(id = 2)),
+                MediaListEntry(status = "COMPLETED", media = Media(id = 3)),
+            ),
+        )
+
+        assertEquals(mapOf(1 to "CURRENT", 2 to "PLANNING", 3 to "COMPLETED"), statuses)
+        assertEquals("Watching", mediaListStatusLabel(statuses[1]))
+        assertEquals("Plan to watch", mediaListStatusLabel(statuses[2]))
+        assertEquals("Completed", mediaListStatusLabel(statuses[3]))
     }
 
     @Test

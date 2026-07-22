@@ -40,7 +40,11 @@ data class NextAiringEpisode(
 )
 
 @Serializable
-data class StudioNode(val name: String? = null, val isAnimationStudio: Boolean = false)
+data class StudioNode(
+    val id: Int = 0,
+    val name: String? = null,
+    val isAnimationStudio: Boolean = false,
+)
 
 @Serializable
 data class StudioConnection(val nodes: List<StudioNode> = emptyList())
@@ -91,6 +95,8 @@ data class DiscoverFilters(
     val query: String = "",
     val genres: Set<String> = emptySet(),
     val tags: Set<String> = emptySet(),
+    val studioId: Int? = null,
+    val studioName: String? = null,
     val year: Int? = null,
     val status: String? = null,
     val format: String? = null,
@@ -98,7 +104,8 @@ data class DiscoverFilters(
     val sort: String = "TRENDING_DESC",
 ) {
     val activeCount: Int
-        get() = genres.size + tags.size + listOf(year, status, format, minimumScore).count { it != null }
+        get() = genres.size + tags.size +
+            listOf(studioId, year, status, format, minimumScore).count { it != null }
 }
 
 @Serializable
@@ -126,6 +133,15 @@ data class DiscoverOptionsData(
 
 @Serializable
 data class GqlDiscoverOptionsResponse(val data: DiscoverOptionsData? = null)
+
+@Serializable
+data class StudioPage(val studios: List<StudioNode> = emptyList())
+
+@Serializable
+data class StudioPageData(@SerialName("Page") val page: StudioPage? = null)
+
+@Serializable
+data class GqlStudioPageResponse(val data: StudioPageData? = null)
 
 // ---- Response envelopes ----
 @Serializable
