@@ -602,8 +602,6 @@ fun PlayerSurface(
     }
     // The speed to restore once a hold-for-2x gesture ends (the user's chosen playback speed).
     var preHoldSpeed by remember { mutableStateOf(1f) }
-    var seekFlash by remember { mutableIntStateOf(0) } // -10 / +10, 0 = hidden
-    var seekFlashTick by remember { mutableIntStateOf(0) }
     var playbackGestureIsPlaying by remember { mutableStateOf<Boolean?>(null) }
     val autoSkipIntroOutro by SettingsStore.autoSkipIntroOutro.collectAsState()
     val autoplay by SettingsStore.autoplay.collectAsState()
@@ -613,13 +611,6 @@ fun PlayerSurface(
     val outroEndMs = skip?.outroEnd?.times(1000)?.toLong()
     var introAutoSkipped by remember(activeStream.url, introStartMs, introEndMs) { mutableStateOf(false) }
     var outroAutoHandled by remember(activeStream.url, outroStartMs, outroEndMs) { mutableStateOf(false) }
-
-    LaunchedEffect(seekFlashTick) {
-        if (seekFlash != 0) {
-            delay(650)
-            seekFlash = 0
-        }
-    }
 
     LaunchedEffect(playbackGestureIsPlaying) {
         if (playbackGestureIsPlaying != null) {
@@ -783,34 +774,25 @@ fun PlayerSurface(
             )
         }
 
-        // Phone controls, hidden: the gesture layer owns the surface — tap shows the controls, a
-        // vertical drag down the left edge scrubs brightness / right edge volume. A double tap in
-        // the outer thirds seeks ±10 s; the center third toggles playback. (TV uses controls.)
+        // Phone controls, hidden: tap shows the controls, horizontal drag seeks, vertical edge
+        // drags control brightness/volume, and double-tap toggles playback. (TV uses controls.)
         if (controller != null && !device.isTv && !phoneControlsVisible) {
             PlayerGestureControls(
+                positionMs = positionMs,
+                durationMs = durationMs,
                 onTap = {
                     phoneControlsVisible = true
                     phoneControlsInteraction++
                 },
-                onDoubleTap = { action ->
+                onDoubleTap = {
                     val active = controller ?: return@PlayerGestureControls
-                    when (action) {
-                        PlayerDoubleTapAction.Rewind -> {
-                            active.seekBack()
-                            seekFlash = -10
-                            seekFlashTick++
-                        }
-                        PlayerDoubleTapAction.TogglePlayback -> {
-                            val willPlay = !active.isPlaying
-                            if (willPlay) active.play() else active.pause()
-                            playbackGestureIsPlaying = willPlay
-                        }
-                        PlayerDoubleTapAction.Forward -> {
-                            active.seekForward()
-                            seekFlash = +10
-                            seekFlashTick++
-                        }
-                    }
+                    val willPlay = !active.isPlaying
+                    if (willPlay) active.play() else active.pause()
+                    playbackGestureIsPlaying = willPlay
+                },
+                onSeek = { target ->
+                    controller?.seekTo(target)
+                    phoneControlsInteraction++
                 },
                 onHoldSpeed = { active ->
                     val activeController = controller ?: return@PlayerGestureControls
@@ -886,18 +868,6 @@ fun PlayerSurface(
             }
         }
 
-        if (seekFlash != 0) {
-            Text(
-                if (seekFlash > 0) "+10 s" else "−10 s",
-                color = Color.White,
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier
-                    .align(if (seekFlash > 0) Alignment.CenterEnd else Alignment.CenterStart)
-                    .padding(horizontal = 48.dp)
-                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(24.dp))
-                    .padding(horizontal = 18.dp, vertical = 8.dp),
-            )
-        }
         playbackGestureIsPlaying?.let { isPlaying ->
             PlaybackGestureIndicator(isPlaying, Modifier.align(Alignment.Center))
         }

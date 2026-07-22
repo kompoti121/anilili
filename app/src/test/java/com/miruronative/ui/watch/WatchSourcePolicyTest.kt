@@ -178,6 +178,26 @@ class WatchSourcePolicyTest {
     }
 
     @Test
+    fun `late sub-only catalog cannot erase active dubbed navigation spine`() {
+        val activeDub = listOf(episode(1, id = "active-dub"))
+        val lateCatalog = EpisodesResult(
+            listOf(ProviderData("bonk", sub = listOf(episode(1)), dub = emptyList())),
+        )
+        val lateDubSpine = pickNavigationSpine(lateCatalog, "bonk", Category.DUB)
+
+        assertTrue(lateDubSpine.isEmpty())
+        assertEquals(activeDub, retainNonEmptyNavigationSpine(activeDub, lateDubSpine))
+    }
+
+    @Test
+    fun `late dubbed catalog still refreshes active navigation spine`() {
+        val activeDub = listOf(episode(1, id = "active-dub"))
+        val refreshedDub = listOf(episode(1, id = "refreshed-dub"), episode(2))
+
+        assertEquals(refreshedDub, retainNonEmptyNavigationSpine(activeDub, refreshedDub))
+    }
+
+    @Test
     fun `anilist progress waits until most of a full integer episode was watched`() {
         assertTrue(shouldSyncAniListProgress(3.0, positionMs = 1_200_000, durationMs = 1_440_000))
         assertEquals(false, shouldSyncAniListProgress(3.0, positionMs = 600_000, durationMs = 1_440_000))

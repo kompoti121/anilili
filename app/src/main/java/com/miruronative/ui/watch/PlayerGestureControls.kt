@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -74,7 +75,13 @@ private sealed interface GestureLevel {
 
 private enum class GestureZone { Brightness, Volume }
 
-internal enum class PlayerDoubleTapAction { Rewind, TogglePlayback, Forward }
+private enum class GestureDragAxis { Horizontal, Vertical }
+
+private data class SeekGesture(
+    val targetMs: Long,
+    val deltaMs: Long,
+    val durationMs: Long,
+)
 
 // Vertical drags are only picked up inside these edge strips, so a swipe across the middle of the
 // picture leaves brightness and volume alone. Sizing them by share of the width keeps them within
@@ -82,23 +89,29 @@ internal enum class PlayerDoubleTapAction { Rewind, TogglePlayback, Forward }
 private const val GESTURE_EDGE_FRACTION = 0.28f
 private val GESTURE_EDGE_MIN = 64.dp
 private val GESTURE_EDGE_MAX = 160.dp
+private const val SEEK_MS_PER_SCREEN = 120_000L
 
 /**
  * Touch-gesture overlay shared by the native and embed players. A vertical drag down the left edge
  * of the screen scrubs brightness (the Activity window's `screenBrightness`); down the right edge it
  * scrubs volume (the media audio stream, which both ExoPlayer and the WebView route through). The
  * middle of the picture is deliberately inert to either, so neither is caught by accident. A
- * transient slider indicator shows the level while dragging.
+ * transient slider indicator shows the level while dragging. A horizontal drag anywhere on the
+ * picture previews a relative seek and commits it when the finger is released.
  *
  * Taps and double-taps are handled here too so a single pointer handler owns the surface: the drag
  * detector and the tap detectors can't be separate `pointerInput`s without one consuming the down
- * the other needs. The down is always consumed, so the player/page beneath never sees the touch.
+ * the other needs. Double-tap always toggles playback. The down is always consumed, so the
+ * player/page beneath never sees the touch.
  */
 @Composable
 internal fun PlayerGestureControls(
     modifier: Modifier = Modifier,
+    positionMs: Long = 0L,
+    durationMs: Long = 0L,
     onTap: (() -> Unit)? = null,
-    onDoubleTap: ((PlayerDoubleTapAction) -> Unit)? = null,
+    onDoubleTap: (() -> Unit)? = null,
+    onSeek: ((Long) -> Unit)? = null,
     onHoldSpeed: ((active: Boolean) -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -108,9 +121,13 @@ internal fun PlayerGestureControls(
     }
     val currentOnTap by rememberUpdatedState(onTap)
     val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
+    val currentOnSeek by rememberUpdatedState(onSeek)
     val currentOnHoldSpeed by rememberUpdatedState(onHoldSpeed)
+    val currentPositionMs by rememberUpdatedState(positionMs)
+    val currentDurationMs by rememberUpdatedState(durationMs)
 
     var level by remember { mutableStateOf<GestureLevel?>(null) }
+    var seekGesture by remember { mutableStateOf<SeekGesture?>(null) }
     var levelTick by remember { mutableIntStateOf(0) }
     var holdSpeedActive by remember { mutableStateOf(false) }
     LaunchedEffect(levelTick) {
@@ -141,7 +158,9 @@ internal fun PlayerGestureControls(
                             GestureZone.Volume -> readVolume(audioManager)
                             null -> 0f
                         }
-                        var dragging = false
+                        val seekStartPositionMs = currentPositionMs
+                        val seekDurationMs = currentDurationMs
+                        var dragAxis: GestureDragAxis? = null
                         var holding = false
                         var up: PointerInputChange? = null
                         // The long-press deadline is anchored to the down, not to the last event,
@@ -149,7 +168,7 @@ internal fun PlayerGestureControls(
                         val holdDeadline = down.uptimeMillis + viewConfiguration.longPressTimeoutMillis
 
                         while (true) {
-                            val event = if (!dragging && !holding && currentOnHoldSpeed != null) {
+                            val event = if (dragAxis == null && !holding && currentOnHoldSpeed != null) {
                                 val remaining = holdDeadline - android.os.SystemClock.uptimeMillis()
                                 if (remaining <= 0) {
                                     null
@@ -172,30 +191,53 @@ internal fun PlayerGestureControls(
                                 up = change
                                 break
                             }
-                            if (!dragging && !holding) {
+                            if (dragAxis == null && !holding) {
                                 val dy = change.position.y - down.position.y
                                 val dx = change.position.x - down.position.x
-                                if (abs(dy) > slop && abs(dy) > abs(dx)) dragging = true
-                            }
-                            if (dragging) {
-                                // A drag started in the middle still counts as a drag — it just
-                                // moves nothing — so letting go of one never lands as a tap.
-                                if (zone != null) {
-                                    val delta = -change.positionChange().y / size.height.toFloat()
-                                    value = (value + delta).coerceIn(0f, 1f)
-                                    when (zone) {
-                                        GestureZone.Brightness -> {
-                                            applyBrightness(activity, value)
-                                            level = GestureLevel.Brightness(value)
-                                        }
-                                        GestureZone.Volume -> {
-                                            applyVolume(audioManager, value)
-                                            level = GestureLevel.Volume(value)
-                                        }
-                                    }
-                                    levelTick++
+                                dragAxis = when {
+                                    abs(dx) > slop && abs(dx) > abs(dy) -> GestureDragAxis.Horizontal
+                                    abs(dy) > slop && abs(dy) > abs(dx) -> GestureDragAxis.Vertical
+                                    else -> null
                                 }
-                                change.consume()
+                            }
+                            when (dragAxis) {
+                                GestureDragAxis.Horizontal -> {
+                                    if (currentOnSeek != null && seekDurationMs > 0L) {
+                                        val target = playerSlideSeekTarget(
+                                            startPositionMs = seekStartPositionMs,
+                                            durationMs = seekDurationMs,
+                                            horizontalDragPx = change.position.x - down.position.x,
+                                            widthPx = size.width.toFloat(),
+                                        )
+                                        seekGesture = SeekGesture(
+                                            targetMs = target,
+                                            deltaMs = target - seekStartPositionMs,
+                                            durationMs = seekDurationMs,
+                                        )
+                                    }
+                                    change.consume()
+                                }
+                                GestureDragAxis.Vertical -> {
+                                    // A vertical drag started in the middle still counts as a drag
+                                    // so releasing it cannot accidentally land as a tap.
+                                    if (zone != null) {
+                                        val delta = -change.positionChange().y / size.height.toFloat()
+                                        value = (value + delta).coerceIn(0f, 1f)
+                                        when (zone) {
+                                            GestureZone.Brightness -> {
+                                                applyBrightness(activity, value)
+                                                level = GestureLevel.Brightness(value)
+                                            }
+                                            GestureZone.Volume -> {
+                                                applyVolume(audioManager, value)
+                                                level = GestureLevel.Volume(value)
+                                            }
+                                        }
+                                        levelTick++
+                                    }
+                                    change.consume()
+                                }
+                                null -> Unit
                             }
                             if (holding) change.consume()
                         }
@@ -206,7 +248,16 @@ internal fun PlayerGestureControls(
                             up?.consume()
                             return@awaitEachGesture
                         }
-                        if (dragging || up == null) return@awaitEachGesture
+                        if (dragAxis != null) {
+                            val completedSeek = seekGesture
+                            seekGesture = null
+                            if (dragAxis == GestureDragAxis.Horizontal && up != null) {
+                                completedSeek?.let { currentOnSeek?.invoke(it.targetMs) }
+                            }
+                            up?.consume()
+                            return@awaitEachGesture
+                        }
+                        if (up == null) return@awaitEachGesture
                         up.consume()
                         if (currentOnDoubleTap == null) {
                             currentOnTap?.invoke()
@@ -221,23 +272,20 @@ internal fun PlayerGestureControls(
                             currentOnTap?.invoke()
                         } else {
                             secondDown.consume()
-                            val action = playerDoubleTapAction(
-                                x = secondDown.position.x,
-                                width = size.width.toFloat(),
-                            )
                             while (true) {
                                 val e = awaitPointerEvent()
                                 val c = e.changes.firstOrNull { it.id == secondDown.id } ?: break
                                 c.consume()
                                 if (!c.pressed) break
                             }
-                            currentOnDoubleTap?.invoke(action)
+                            currentOnDoubleTap?.invoke()
                         }
                     }
                 },
         )
 
         level?.let { GestureLevelIndicator(it, Modifier.align(Alignment.Center)) }
+        seekGesture?.let { SeekGestureIndicator(it, Modifier.align(Alignment.Center)) }
         if (holdSpeedActive) {
             Row(
                 modifier = Modifier
@@ -263,15 +311,17 @@ internal fun PlayerGestureControls(
     }
 }
 
-/** Outer thirds retain seek gestures; the center third toggles playback. */
-internal fun playerDoubleTapAction(x: Float, width: Float): PlayerDoubleTapAction {
-    if (width <= 0f) return PlayerDoubleTapAction.TogglePlayback
-    val fraction = (x / width).coerceIn(0f, 1f)
-    return when {
-        fraction < 1f / 3f -> PlayerDoubleTapAction.Rewind
-        fraction > 2f / 3f -> PlayerDoubleTapAction.Forward
-        else -> PlayerDoubleTapAction.TogglePlayback
-    }
+/** A full-width swipe moves two minutes; shorter movement scales linearly and clamps to the video. */
+internal fun playerSlideSeekTarget(
+    startPositionMs: Long,
+    durationMs: Long,
+    horizontalDragPx: Float,
+    widthPx: Float,
+): Long {
+    val start = if (durationMs > 0L) startPositionMs.coerceIn(0L, durationMs) else startPositionMs.coerceAtLeast(0L)
+    if (durationMs <= 0L || widthPx <= 0f || !widthPx.isFinite() || !horizontalDragPx.isFinite()) return start
+    val target = start.toDouble() + horizontalDragPx / widthPx * SEEK_MS_PER_SCREEN
+    return target.coerceIn(0.0, durationMs.toDouble()).toLong()
 }
 
 @Composable
@@ -328,6 +378,38 @@ private fun GestureLevelIndicator(level: GestureLevel, modifier: Modifier = Modi
             "${(level.fraction * 100).roundToInt()}%",
             color = Color.White,
             style = MaterialTheme.typography.labelMedium,
+        )
+    }
+}
+
+@Composable
+private fun SeekGestureIndicator(seek: SeekGesture, modifier: Modifier = Modifier) {
+    val forward = seek.deltaMs >= 0L
+    Column(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.68f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (forward) Icons.Default.FastForward else Icons.Default.FastRewind,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(26.dp),
+            )
+            Text(
+                text = (if (forward) "+" else "−") + formatPlayerTime(abs(seek.deltaMs)),
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(start = 6.dp),
+            )
+        }
+        Text(
+            text = "${formatPlayerTime(seek.targetMs)} / ${formatPlayerTime(seek.durationMs)}",
+            color = Color.White.copy(alpha = 0.85f),
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }

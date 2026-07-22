@@ -5,16 +5,35 @@ import org.junit.Test
 
 class PlayerGestureControlsTest {
     @Test
-    fun doubleTapUsesOuterThirdsForSeekingAndCenterForPlayback() {
-        assertEquals(PlayerDoubleTapAction.Rewind, playerDoubleTapAction(x = 10f, width = 300f))
-        assertEquals(PlayerDoubleTapAction.TogglePlayback, playerDoubleTapAction(x = 100f, width = 300f))
-        assertEquals(PlayerDoubleTapAction.TogglePlayback, playerDoubleTapAction(x = 150f, width = 300f))
-        assertEquals(PlayerDoubleTapAction.TogglePlayback, playerDoubleTapAction(x = 200f, width = 300f))
-        assertEquals(PlayerDoubleTapAction.Forward, playerDoubleTapAction(x = 290f, width = 300f))
+    fun horizontalSlideSeeksRelativeToDragDistance() {
+        assertEquals(
+            630_000L,
+            playerSlideSeekTarget(
+                startPositionMs = 600_000L,
+                durationMs = 1_440_000L,
+                horizontalDragPx = 250f,
+                widthPx = 1_000f,
+            ),
+        )
+        assertEquals(
+            570_000L,
+            playerSlideSeekTarget(
+                startPositionMs = 600_000L,
+                durationMs = 1_440_000L,
+                horizontalDragPx = -250f,
+                widthPx = 1_000f,
+            ),
+        )
     }
 
     @Test
-    fun doubleTapDefaultsToPlaybackWhenSurfaceHasNoWidth() {
-        assertEquals(PlayerDoubleTapAction.TogglePlayback, playerDoubleTapAction(x = 0f, width = 0f))
+    fun horizontalSlideClampsToVideoBounds() {
+        assertEquals(0L, playerSlideSeekTarget(10_000L, 60_000L, -1_000f, 1_000f))
+        assertEquals(60_000L, playerSlideSeekTarget(50_000L, 60_000L, 1_000f, 1_000f))
+    }
+
+    @Test
+    fun horizontalSlideWithoutDurationKeepsCurrentPosition() {
+        assertEquals(15_000L, playerSlideSeekTarget(15_000L, 0L, 500f, 1_000f))
     }
 }

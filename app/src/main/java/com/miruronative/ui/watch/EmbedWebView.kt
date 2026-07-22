@@ -716,30 +716,24 @@ fun EmbedWebView(
         // Swallows every touch so the page never sees one: web players only raise their control
         // chrome on interaction, so starving them of taps keeps the provider UI hidden and lets
         // our overlay be the only controls. Also neuters tap-hijack ads, which need a real click.
-        // A vertical drag down the left edge scrubs brightness, down the right edge volume.
+        // Horizontal drag seeks; vertical edge drags control brightness and volume.
         if (touchControlsActive) PlayerGestureControls(
+            positionMs = positionMs,
+            durationMs = durationMs,
             onTap = {
                 touchControlsVisible = !touchControlsVisible
                 touchControlsInteraction++
             },
-            onDoubleTap = { action ->
-                when (action) {
-                    PlayerDoubleTapAction.Rewind -> {
-                        val target = (positionMs - 10_000L).coerceAtLeast(0L)
-                        seekWebVideo(webView, target)
-                        positionMs = target
-                    }
-                    PlayerDoubleTapAction.TogglePlayback -> {
-                        DiagnosticsLog.event("EmbedWebView double tap playPause")
-                        webView?.evaluateJavascript(REMOTE_TOGGLE_PLAYBACK_JS, null)
-                        webIsPlaying = !webIsPlaying
-                        playbackGestureIsPlaying = webIsPlaying
-                    }
-                    PlayerDoubleTapAction.Forward -> {
-                        seekWebVideo(webView, positionMs + 10_000L)
-                        positionMs += 10_000L
-                    }
-                }
+            onDoubleTap = {
+                DiagnosticsLog.event("EmbedWebView double tap playPause")
+                webView?.evaluateJavascript(REMOTE_TOGGLE_PLAYBACK_JS, null)
+                webIsPlaying = !webIsPlaying
+                playbackGestureIsPlaying = webIsPlaying
+            },
+            onSeek = { target ->
+                seekWebVideo(webView, target)
+                positionMs = target
+                touchControlsInteraction++
             },
             onHoldSpeed = { active ->
                 if (active) {

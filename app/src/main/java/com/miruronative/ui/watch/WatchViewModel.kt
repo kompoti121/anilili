@@ -270,7 +270,7 @@ class WatchViewModel : ViewModel() {
             val late = runCatching { deferred.await() }.getOrNull()?.getOrNull() ?: return@launch
             if (late.isEmpty) return@launch
             mergedEpisodes = repo.mergeProviders(late, mergedEpisodes)
-            spine = pickSpine(mergedEpisodes)
+            spine = retainNonEmptyNavigationSpine(spine, pickSpine(mergedEpisodes))
             DiagnosticsLog.event(
                 "Watch miruro late merge applied id=$id providers=" + late.providerNames.joinToString(),
             )
@@ -301,7 +301,7 @@ class WatchViewModel : ViewModel() {
                 .getOrNull()
             if (anivexa != null && !anivexa.isEmpty) {
                 mergedEpisodes = repo.mergeProviders(mergedEpisodes, anivexa)
-                spine = pickSpine(mergedEpisodes)
+                spine = retainNonEmptyNavigationSpine(spine, pickSpine(mergedEpisodes))
                 DiagnosticsLog.event(
                     "Watch anivexa merge applied id=$id providers=" + mergedEpisodes.providerNames.joinToString(),
                 )
@@ -965,3 +965,14 @@ internal fun pickNavigationSpine(
         .orEmpty()
     return if (preferredList.size >= longest.size) preferredList else longest
 }
+
+/**
+ * Supplemental catalogs must not invalidate playback that already resolved successfully.
+ * In particular, a late catalog can replace a provider row that had dubbed episodes with a
+ * sub-only row. Publishing that empty candidate with currentIndex=0 makes WatchData.current
+ * index into EmptyList and crashes the app.
+ */
+internal fun retainNonEmptyNavigationSpine(
+    current: List<EpisodeItem>,
+    candidate: List<EpisodeItem>,
+): List<EpisodeItem> = candidate.ifEmpty { current }
