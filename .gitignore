@@ -36,9 +36,4 @@ anilili-showcase.zip
 showcase/*
 !showcase/mobile/
 showcase/mobile/*
-!showcase/mobile/01-home.webp
-!showcase/mobile/02-browse.webp
-!showcase/mobile/03-filters.webp
-!showcase/mobile/04-search.webp
-!showcase/mobile/05-anime-details.webp
-!showcase/mobile/06-player.webp
+!showcase/mobile/*.webp
