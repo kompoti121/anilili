@@ -14,6 +14,8 @@ import com.miruronative.data.library.LibraryStore
 import com.miruronative.data.library.MalExport
 import com.miruronative.data.library.MalExportEntry
 import com.miruronative.data.library.MalExportFile
+import com.miruronative.data.library.MalImport
+import com.miruronative.data.library.MalImportSummary
 import com.miruronative.data.library.WatchlistEntry
 import com.miruronative.ui.UiState
 import com.miruronative.ui.rethrowIfCancellation
@@ -109,6 +111,36 @@ class ProfileViewModel : ViewModel() {
         _profile.value = null
     }
 
+    /**
+     * Imports a MyAnimeList XML export into the local watchlist. Every entry the file carries
+     * is saved (the file is the user's own list); titles AniList can't map from a MAL id are
+     * counted as unmatched rather than failing the run.
+     */
+    suspend fun importMalXml(bytes: ByteArray): MalImportSummary = withContext(Dispatchers.IO) {
+        val parsed = MalImport.parse(bytes)
+        if (parsed.isEmpty()) error("No anime entries found in that file")
+        val mediaByMalId = repo.mediaByMalIds(parsed.map { it.malId })
+            .filter { it.idMal != null }
+            .associateBy { it.idMal!! }
+        val entries = parsed.mapNotNull { entry ->
+            val media = mediaByMalId[entry.malId] ?: return@mapNotNull null
+            WatchlistEntry(
+                anilistId = media.id,
+                title = media.title.preferred,
+                cover = media.coverImage.best,
+                format = media.format,
+                averageScore = media.averageScore,
+            )
+        }
+        val added = LibraryStore.importWatchlist(entries)
+        MalImportSummary(
+            totalEntries = parsed.size,
+            added = added,
+            alreadySaved = entries.size - added,
+            unmatched = parsed.size - entries.size,
+        )
+    }
+
     suspend fun buildMalExport(
         profile: AniListProfile?,
         watchlist: List<WatchlistEntry>,
@@ -160,6 +192,9 @@ class ProfileViewModel : ViewModel() {
         }
 
         history.forEach { item ->
+            // Remote-seeded rows point at the NEXT unwatched episode and mirror the service's
+            // own list anyway; exporting them would overstate progress by one.
+            if (item.fromRemote) return@forEach
             if (entries.containsKey(item.anilistId)) return@forEach
             val media = repo.animeInfo(item.anilistId) ?: run {
                 skipped++

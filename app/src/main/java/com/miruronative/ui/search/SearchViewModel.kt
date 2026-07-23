@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.miruronative.data.AppGraph
+import com.miruronative.data.library.SearchHistoryStore
 import com.miruronative.data.model.DiscoverFilters
 import com.miruronative.data.model.DiscoverOptions
 import com.miruronative.data.model.Media
@@ -27,6 +28,25 @@ class SearchViewModel : ViewModel() {
         private set
 
     val query: String get() = filters.query
+
+    /** Past search terms, most recent first; surfaced when the field is empty. */
+    val searchHistory = SearchHistoryStore.history
+
+    /** Applies a term from the recent-searches list as if the user had typed it. */
+    fun applyHistoryQuery(term: String) {
+        SearchHistoryStore.record(term)
+        update(filters.copy(query = term), delayMs = 0)
+    }
+
+    fun removeHistoryQuery(term: String) = SearchHistoryStore.remove(term)
+    fun clearHistory() = SearchHistoryStore.clear()
+
+    /**
+     * Persist the current query as a real search. Called when the user commits — presses the
+     * keyboard's search key, or opens a result — never on every keystroke, so partial terms
+     * ("fr", "fri") never pollute the list.
+     */
+    fun recordCurrentSearch() = SearchHistoryStore.record(filters.query)
 
     private val _state = MutableStateFlow<UiState<List<Media>>>(UiState.Loading)
     val state = _state.asStateFlow()

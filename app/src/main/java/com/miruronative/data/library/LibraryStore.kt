@@ -151,6 +151,28 @@ object LibraryStore {
         }
     }
 
+    /**
+     * Bulk add from a MAL XML import. Existing saves keep their position and addedAt; the
+     * whole batch syncs to the signed-in list service in one push rather than per title.
+     * Returns how many entries were actually new.
+     */
+    fun importWatchlist(entries: List<WatchlistEntry>): Int {
+        val current = _watchlist.value
+        val existing = current.mapTo(mutableSetOf()) { it.anilistId }
+        val now = System.currentTimeMillis()
+        val newEntries = entries
+            .distinctBy { it.anilistId }
+            .filter { it.anilistId !in existing }
+            .map { it.copy(addedAt = now) }
+        if (newEntries.isEmpty()) return 0
+        val updated = newEntries + current
+        _watchlist.value = updated
+        persist(KEY_WATCHLIST, updated, WatchlistEntry.serializer())
+        ReleaseSyncScheduler.runNow(appContext)
+        syncSavedToRemote()
+        return newEntries.size
+    }
+
     /** Merge AniList Planning into this device without deleting device-only saves. */
     fun hydrateWatchlistFromAniList(entries: List<WatchlistEntry>) {
         val merged = mergeWatchlistEntries(_watchlist.value, entries)
@@ -174,6 +196,7 @@ object LibraryStore {
             RemoteListStatus.serializer(),
         )
         lastRemoteRefreshAt = System.currentTimeMillis()
+        seedHistoryFromRemote(entries)
 
         if (SettingsStore.syncSavedToAniList.value) {
             hydrateWatchlistFromAniList(
@@ -190,6 +213,44 @@ object LibraryStore {
                 },
             )
         }
+    }
+
+    /**
+     * Continue Watching from the signed-in service: every title it says the user is watching
+     * becomes a resumable row pointing at the next unwatched episode, so a fresh install isn't
+     * blank. Real playback records always win — seeded rows sit behind them, are replaced
+     * wholesale on every refresh (remote progress moves them forward), get superseded by a real
+     * record the moment the title is played here, and vanish on logout. The "auto" provider is
+     * the same sentinel Watch Now uses when nothing local exists: the watch screen resolves a
+     * source itself.
+     */
+    private fun seedHistoryFromRemote(entries: List<MediaListEntry>) {
+        val preferDub = SettingsStore.preferDub.value
+        val local = _history.value.filterNot { it.fromRemote }
+        val localIds = local.mapTo(mutableSetOf()) { it.anilistId }
+        val seeded = entries.mapNotNull { entry ->
+            if (entry.status != "CURRENT" && entry.status != "REPEATING") return@mapNotNull null
+            val media = entry.media ?: return@mapNotNull null
+            if (media.id in localIds) return@mapNotNull null
+            val nextEpisode = entry.progress + 1
+            val total = media.episodes
+            if (total != null && total > 0 && nextEpisode > total) return@mapNotNull null
+            HistoryEntry(
+                anilistId = media.id,
+                title = media.title.preferred,
+                cover = media.coverImage.best,
+                episodeNumber = nextEpisode.toDouble(),
+                provider = "auto",
+                category = if (preferDub) "dub" else "sub",
+                fromRemote = true,
+            )
+        }
+        val updated = (local + seeded).take(MAX_HISTORY)
+        if (updated == _history.value) return
+        _history.value = updated
+        // No WatchNextManager publish for seeded rows: the launcher's Continue Watching channel
+        // is reserved for titles actually played on this device.
+        persist(KEY_HISTORY, updated, HistoryEntry.serializer())
     }
 
     /** Update the snapshot synchronously after playback changes an AniList/MAL list state. */
@@ -254,6 +315,12 @@ object LibraryStore {
         lastRemoteRefreshAt = 0L
         _remoteStatuses.value = emptyMap()
         prefs.edit().remove(KEY_REMOTE_STATUSES).apply()
+        // Seeded Continue Watching rows belong to the account that just signed out.
+        val localOnly = _history.value.filterNot { it.fromRemote }
+        if (localOnly != _history.value) {
+            _history.value = localOnly
+            persist(KEY_HISTORY, localOnly, HistoryEntry.serializer())
+        }
     }
 
     // ---- persistence ----

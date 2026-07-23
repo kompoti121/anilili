@@ -261,6 +261,7 @@ class MiruroRepository(
 
     // ---- authenticated (AniList login) ----
     suspend fun viewer() = aniList.viewer()
+    suspend fun mediaByMalIds(malIds: List<Int>) = aniList.mediaByMalIds(malIds)
     suspend fun notifications(markAllRead: Boolean = false) = aniList.notifications(markAllRead)
     suspend fun favouriteAnime() = aniList.favouriteAnime()
     suspend fun userAnimeList(userId: Int) = aniList.userAnimeList(userId)

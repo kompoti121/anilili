@@ -2,6 +2,7 @@ package com.miruronative.ui.search
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,12 +28,14 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -60,6 +63,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -147,7 +151,8 @@ fun SearchScreen(
                     ResultsGrid(
                         results = current.data,
                         filters = vm.filters,
-                        onAnimeClick = onAnimeClick,
+                        // A tapped result is proof the query mattered, so record it before leaving.
+                        onAnimeClick = { id -> vm.recordCurrentSearch(); onAnimeClick(id) },
                         gridState = gridState,
                         isLoadingMore = isLoadingMore,
                         onLoadMore = vm::loadMore,
@@ -182,6 +187,19 @@ private fun SearchTopBar(
         color = MaterialTheme.colorScheme.background,
         tonalElevation = 0.dp,
     ) {
+        val history by vm.searchHistory.collectAsState()
+        var fieldFocused by remember { mutableStateOf(false) }
+        // Past searches surfaced as an autocomplete list while the field is focused: everything
+        // recent when it's empty, narrowing to matches as the user types (the exact current term
+        // drops out — it's already in the box). TV keeps its D-pad grid, so it opts out.
+        val suggestions = remember(history, vm.query, fieldFocused, device.isTv) {
+            if (device.isTv || !fieldFocused) {
+                emptyList()
+            } else {
+                val term = vm.query.trim()
+                history.filter { it.contains(term, ignoreCase = true) && !it.equals(term, ignoreCase = true) }
+            }
+        }
         Column(
             Modifier
                 .fillMaxWidth()
@@ -213,6 +231,7 @@ private fun SearchTopBar(
                         onValueChange = vm::onQueryChange,
                         modifier = fieldModifier
                             .fillMaxWidth()
+                            .onFocusChanged { fieldFocused = it.isFocused }
                             // TV: the text field consumes D-pad Down for cursor handling, so
                             // focus can never escape into the results. Hand it off manually.
                             .onPreviewKeyEvent { event ->
@@ -240,6 +259,7 @@ private fun SearchTopBar(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = {
+                            vm.recordCurrentSearch()
                             keyboard?.hide()
                             focusManager.moveFocus(FocusDirection.Down)
                         }),
@@ -261,6 +281,16 @@ private fun SearchTopBar(
                     }
                 }
             }
+
+            SearchSuggestions(
+                suggestions = suggestions,
+                onPick = { term ->
+                    vm.applyHistoryQuery(term)
+                    keyboard?.hide()
+                    focusManager.clearFocus()
+                },
+                onRemove = vm::removeHistoryQuery,
+            )
 
             Text(
                 "Categories",
@@ -285,6 +315,63 @@ private fun SearchTopBar(
                         onClick = { vm.toggleGenre(genre) },
                         label = { Text(genre) },
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Autocomplete list of past searches shown under the field while it is focused. Animated so it
+ * slides in on focus rather than snapping the layout, and capped so a long history never pushes
+ * the categories off-screen — the field's own scroll reaches the rest.
+ */
+@Composable
+private fun SearchSuggestions(
+    suggestions: List<String>,
+    onPick: (String) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    AnimatedVisibility(visible = suggestions.isNotEmpty()) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f),
+            tonalElevation = 2.dp,
+        ) {
+            Column(Modifier.padding(vertical = 4.dp)) {
+                suggestions.take(8).forEach { term ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(term) }
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.History,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            term,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f).padding(start = 12.dp),
+                        )
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Remove $term",
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .clickable { onRemove(term) }
+                                .padding(6.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }

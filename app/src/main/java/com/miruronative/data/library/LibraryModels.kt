@@ -16,6 +16,12 @@ data class HistoryEntry(
     val positionMs: Long = 0,
     val durationMs: Long = 0,
     val updatedAt: Long = 0,
+    /**
+     * Seeded from AniList/MAL progress rather than actual playback here. Refreshed wholesale on
+     * every remote sync (so remote progress moves it forward), replaced by a real record the
+     * moment the user plays the title, and dropped on logout.
+     */
+    val fromRemote: Boolean = false,
 ) {
     val progressFraction: Float
         get() = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f

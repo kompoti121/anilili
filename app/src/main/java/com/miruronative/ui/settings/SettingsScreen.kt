@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -108,6 +109,8 @@ fun SettingsScreen(
     var pendingMalExport by remember { mutableStateOf<MalExportFile?>(null) }
     var malExportBusy by remember { mutableStateOf(false) }
     var malExportMessage by remember { mutableStateOf<String?>(null) }
+    var malImportBusy by remember { mutableStateOf(false) }
+    var malImportMessage by remember { mutableStateOf<String?>(null) }
     var diagnosticsMessage by remember { mutableStateOf<String?>(null) }
     var tvDiagnosticsVisible by remember { mutableStateOf(false) }
     var captionAppearanceVisible by remember { mutableStateOf(false) }
@@ -155,6 +158,33 @@ fun SettingsScreen(
             }
         }.onFailure { error ->
             malExportMessage = error.message ?: "MAL export failed"
+        }
+    }
+    // MAL serves exports as .xml.gz, which file pickers report under assorted mime types, so the
+    // filter stays wide open and the parser decides.
+    val malImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            malImportBusy = true
+            malImportMessage = null
+            runCatching {
+                val bytes = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: error("Couldn't open that file")
+                }
+                vm.importMalXml(bytes)
+            }.onSuccess { summary ->
+                malImportMessage = buildString {
+                    append("Imported ${summary.added} new anime")
+                    if (summary.alreadySaved > 0) append("; ${summary.alreadySaved} already saved")
+                    if (summary.unmatched > 0) append("; ${summary.unmatched} not found on AniList")
+                }
+            }.onFailure { error ->
+                malImportMessage = error.message ?: "MAL import failed"
+            }
+            malImportBusy = false
         }
     }
 
@@ -309,6 +339,28 @@ fun SettingsScreen(
                 )
             }
             malExportMessage?.let { message ->
+                item {
+                    Text(
+                        message,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                }
+            }
+            item {
+                SettingsAction(
+                    title = if (malImportBusy) "Importing MyAnimeList XML..." else "Import MyAnimeList XML",
+                    icon = { Icon(Icons.Default.Upload, contentDescription = null) },
+                    enabled = !malImportBusy,
+                    onClick = {
+                        malImportLauncher.launch(
+                            arrayOf("text/xml", "application/xml", "application/gzip", "application/octet-stream", "*/*"),
+                        )
+                    },
+                )
+            }
+            malImportMessage?.let { message ->
                 item {
                     Text(
                         message,

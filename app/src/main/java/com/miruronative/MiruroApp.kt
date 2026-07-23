@@ -50,6 +50,7 @@ class MiruroApp : Application(), ImageLoaderFactory {
         diagnosticsStep("CrashReporter.init") { CrashReporter.init(this) }
         diagnosticsStep("AppGraph.init") { AppGraph.init(this) }
         diagnosticsStep("LibraryStore.init") { LibraryStore.init(this) }
+        diagnosticsStep("SearchHistoryStore.init") { com.miruronative.data.library.SearchHistoryStore.init(this) }
         diagnosticsStep("AuthManager.init") { AuthManager.init(this) }
         diagnosticsStep("MalAuthManager.init") { MalAuthManager.init(this, AppGraph.httpClient) }
         diagnosticsStep("SettingsStore.init") { SettingsStore.init(this) }

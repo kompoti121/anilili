@@ -10,12 +10,14 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -26,15 +28,19 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -59,6 +65,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -69,6 +76,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -418,6 +426,8 @@ private fun HeroPager(
             val page = safeTvPage
             HeroCard(
                 media = items[page],
+                pageIndex = page,
+                pageCount = items.size,
                 onAnimeClick = onAnimeClick,
                 onWatchNow = onWatchNow,
                 canGoPrevious = page > 0,
@@ -439,6 +449,8 @@ private fun HeroPager(
             ) { page ->
                 HeroCard(
                     media = items[page],
+                    pageIndex = page,
+                    pageCount = items.size,
                     onAnimeClick = onAnimeClick,
                     onWatchNow = onWatchNow,
                     canGoPrevious = page > 0,
@@ -453,7 +465,7 @@ private fun HeroPager(
             }
         }
         Row(
-            Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+            Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             repeat(items.size) { i ->
@@ -478,6 +490,8 @@ private fun HeroPager(
 @Composable
 private fun HeroCard(
     media: Media,
+    pageIndex: Int,
+    pageCount: Int,
     onAnimeClick: (Int) -> Unit,
     onWatchNow: (Int) -> Unit,
     canGoPrevious: Boolean,
@@ -509,36 +523,85 @@ private fun HeroCard(
         )
         Box(
             Modifier.fillMaxSize().background(
-                Brush.verticalGradient(0.05f to Color.Black.copy(.08f), .62f to Color.Black.copy(.35f), 1f to MaterialTheme.colorScheme.background),
+                Brush.verticalGradient(
+                    0.0f to Color.Black.copy(.30f),
+                    0.42f to Color.Black.copy(.12f),
+                    0.72f to Color.Black.copy(.45f),
+                    1f to MaterialTheme.colorScheme.background,
+                ),
             ),
         )
+
+        // Top corners: airing countdown on the left, pager position on the right.
+        Row(
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(horizontal = device.pagePadding, vertical = 14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+        ) {
+            heroCountdownLabel(media)?.let { label ->
+                HeroPill {
+                    Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Text(label, Modifier.padding(start = 5.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                }
+            } ?: Spacer(Modifier)
+            if (pageCount > 1) {
+                HeroPill {
+                    Text("${pageIndex + 1}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        " / $pageCount",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(.7f),
+                    )
+                }
+            }
+        }
+
+        // Centered content block: metadata strip, big title, genres, actions.
         Column(
             Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth(if (device.isExpanded) 0.65f else 1f)
-                .padding(horizontal = device.pagePadding, vertical = 24.dp),
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(if (device.isExpanded) 0.8f else 1f)
+                .padding(horizontal = device.pagePadding, vertical = 26.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            media.nextAiringEpisode?.episode?.let { Badge("NEW EPISODE $it SOON") }
+            HeroMetaRow(media)
             Text(
                 media.title.preferred,
-                style = MaterialTheme.typography.headlineSmall,
+                style = if (device.isTv || device.isExpanded) {
+                    MaterialTheme.typography.displaySmall
+                } else {
+                    MaterialTheme.typography.headlineMedium
+                },
                 fontWeight = FontWeight.Black,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                lineHeight = if (device.isTv || device.isExpanded) 42.sp else 34.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier.padding(top = 10.dp),
             )
-            Text(
-                listOfNotNull(media.seasonYear?.toString(), media.format, media.averageScore?.let { "$it% Match" }).joinToString("  •  "),
-                style = MaterialTheme.typography.labelMedium,
-                color = Color.White.copy(.82f),
-                modifier = Modifier.padding(top = 5.dp),
-            )
-            Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
-                    onClick = { onWatchNow(media.id) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+            val genreLabel = media.genres.take(3).joinToString("  ·  ")
+            if (genreLabel.isNotBlank()) {
+                HeroPill(Modifier.padding(top = 12.dp)) {
+                    Text(genreLabel, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
+                }
+            }
+            Row(
+                Modifier.padding(top = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedButton(
+                    onClick = { onAnimeClick(media.id) },
+                    shape = RoundedCornerShape(24.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = Color.Black.copy(.35f),
+                        contentColor = Color.White,
+                    ),
                     modifier = Modifier
-                        .focusRequester(playFocusRequester)
+                        .focusRequester(detailsFocusRequester)
                         .onFocusChanged { if (device.isTv) onFocusChanged(it.isFocused) }
                         .onPreviewKeyEvent { event ->
                             if (device.isTv && event.type == KeyEventType.KeyDown) {
@@ -565,13 +628,15 @@ private fun HeroCard(
                         }
                         .focusHighlight(RoundedCornerShape(24.dp)),
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null)
-                    Text("Play", Modifier.padding(start = 4.dp), fontWeight = FontWeight.Bold)
+                    Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("Details", Modifier.padding(start = 6.dp), fontWeight = FontWeight.SemiBold)
                 }
-                OutlinedButton(
-                    onClick = { onAnimeClick(media.id) },
+                Button(
+                    onClick = { onWatchNow(media.id) },
+                    shape = RoundedCornerShape(24.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
                     modifier = Modifier
-                        .focusRequester(detailsFocusRequester)
+                        .focusRequester(playFocusRequester)
                         .onFocusChanged { if (device.isTv) onFocusChanged(it.isFocused) }
                         .onPreviewKeyEvent { event ->
                             if (device.isTv && event.type == KeyEventType.KeyDown) {
@@ -598,12 +663,101 @@ private fun HeroCard(
                         }
                         .focusHighlight(RoundedCornerShape(24.dp)),
                 ) {
-                    Icon(Icons.Default.Info, contentDescription = null)
-                    Text("Details", Modifier.padding(start = 4.dp))
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Text("Watch Now", Modifier.padding(start = 6.dp), fontWeight = FontWeight.Bold)
                 }
             }
         }
     }
+}
+
+/** Warm gold accent for the hero's star-rating icon; the title itself stays white. */
+private val HERO_STAR_COLOR = Color(0xFFEFC66B)
+
+/** A translucent rounded chip used for the hero's corner pills, genre tag, and metadata frame. */
+@Composable
+private fun HeroPill(modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(.42f))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+/** One entry of the hero metadata strip: optional leading icon (its own tint) plus a label. */
+private data class HeroMetaCell(val icon: ImageVector?, val text: String, val iconTint: Color? = null)
+
+/** Centered format / episodes / score / runtime strip, each present only when known. */
+@Composable
+private fun HeroMetaRow(media: Media) {
+    val cells = buildList {
+        media.format?.let { add(HeroMetaCell(icon = null, text = heroFormatLabel(it))) }
+        // For an airing show the CC count is what's actually out, not the season's planned total.
+        val airedEpisodes = media.nextAiringEpisode?.episode?.minus(1) ?: media.episodes
+        airedEpisodes?.takeIf { it > 0 }?.let { add(HeroMetaCell(Icons.Default.ClosedCaption, "$it")) }
+        media.averageScore?.takeIf { it > 0 }?.let {
+            add(HeroMetaCell(Icons.Default.Star, "$it", iconTint = HERO_STAR_COLOR))
+        }
+        media.duration?.takeIf { it > 0 }?.let { add(HeroMetaCell(Icons.Default.Schedule, "$it mins")) }
+    }
+    if (cells.isEmpty()) return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        cells.forEachIndexed { index, cell ->
+            if (index > 0) {
+                Text(
+                    "•",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(.45f),
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                cell.icon?.let { icon ->
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 3.dp).size(15.dp),
+                        tint = cell.iconTint ?: LocalContentColor.current,
+                    )
+                }
+                Text(cell.text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+private fun heroFormatLabel(format: String): String = when (format) {
+    "TV" -> "TV"
+    "TV_SHORT" -> "TV Short"
+    "MOVIE" -> "Movie"
+    "SPECIAL" -> "Special"
+    "OVA" -> "OVA"
+    "ONA" -> "ONA"
+    "MUSIC" -> "Music"
+    else -> format.replaceFirstChar { it.uppercase() }
+}
+
+/**
+ * "EP 4 · 5D 8H"-style countdown for a title with a scheduled next episode, or null when nothing
+ * is airing. Coarse by design — the biggest two non-zero units (days/hours, or hours/minutes) are
+ * enough for a spotlight and read cleanly at a glance.
+ */
+private fun heroCountdownLabel(media: Media): String? {
+    val next = media.nextAiringEpisode ?: return null
+    val episode = next.episode ?: return null
+    val seconds = next.timeUntilAiring?.takeIf { it > 0 } ?: return "EP $episode SOON"
+    val days = seconds / 86_400
+    val hours = (seconds % 86_400) / 3_600
+    val minutes = (seconds % 3_600) / 60
+    val time = when {
+        days > 0 -> "${days}D ${hours}H"
+        hours > 0 -> "${hours}H ${minutes}M"
+        else -> "${minutes}M"
+    }
+    return "EP $episode  $time"
 }
 
 private data class HeroFocusRequesters(
@@ -689,9 +843,3 @@ private fun ContinueRail(
     }
 }
 
-@Composable
-private fun Badge(text: String) {
-    Box(Modifier.clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.primary).padding(horizontal = 8.dp, vertical = 3.dp)) {
-        Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
-    }
-}
