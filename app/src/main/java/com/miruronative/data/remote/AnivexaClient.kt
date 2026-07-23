@@ -995,14 +995,28 @@ class AnivexaClient(
         }
     }
 
-    private fun language(label: String?): String = when (label?.lowercase()) {
-        "english", "en" -> "en"
-        "japanese", "ja" -> "ja"
-        "french", "fr" -> "fr"
-        "german", "de" -> "de"
-        "spanish", "es" -> "es"
-        "portuguese", "pt" -> "pt"
-        else -> "und"
+    /**
+     * MegaPlay/AniKoto label the track by its full language name ("Indonesian", "Thai captions",
+     * "Spanish(Latin America)"). Match on a contained keyword rather than an exact string so the
+     * suffixes and " captions" qualifiers still resolve. Anything unrecognised stays "und" but the
+     * human label is preserved for the picker either way.
+     */
+    private fun language(label: String?): String {
+        val text = label?.lowercase() ?: return "und"
+        return when {
+            text.contains("english") || text == "en" -> "en"
+            text.contains("japanese") || text == "ja" -> "ja"
+            text.contains("indonesian") || text == "id" -> "id"
+            text.contains("thai") || text == "th" -> "th"
+            text.contains("arabic") || text == "ar" -> "ar"
+            text.contains("french") || text == "fr" -> "fr"
+            text.contains("german") || text == "de" -> "de"
+            text.contains("spanish") || text == "es" -> "es"
+            text.contains("portuguese") || text == "pt" -> "pt"
+            text.contains("italian") || text == "it" -> "it"
+            text.contains("russian") || text == "ru" -> "ru"
+            else -> "und"
+        }
     }
 
     private fun origin(url: String): String = runCatching {
