@@ -22,6 +22,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -32,6 +35,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -55,6 +59,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,6 +80,9 @@ import com.miruronative.ui.components.PullRefreshContainer
 import com.miruronative.ui.components.RatingBadge
 import com.miruronative.ui.components.LocalAppChromeBottomInset
 import com.miruronative.ui.components.ScrollAwareTopBar
+import com.miruronative.playback.EpisodeDownload
+import com.miruronative.playback.EpisodeDownloadState
+import com.miruronative.playback.EpisodeDownloads
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -127,15 +135,18 @@ private val airingOptions = listOf(
 fun ProfileScreen(
     onAnimeClick: (Int) -> Unit,
     onResume: (HistoryEntry) -> Unit,
+    onPlayDownload: (String) -> Unit,
     modifier: Modifier = Modifier,
     vm: ProfileViewModel = viewModel(),
 ) {
+    val context = LocalContext.current
     val device = LocalAppDeviceProfile.current
     val token by AuthManager.token.collectAsState()
     val malLoggedIn by MalAuthManager.loggedIn.collectAsState()
     val profileState by vm.profile.collectAsState()
     val history by LibraryStore.history.collectAsState()
     val watchlist by LibraryStore.watchlist.collectAsState()
+    val episodeDownloads by EpisodeDownloads.downloads(context).collectAsState()
     val isRefreshing by vm.isRefreshing.collectAsState()
     var loginService by remember { mutableStateOf<AccountService?>(null) }
     var selectedViewName by rememberSaveable { mutableStateOf(LibraryView.WATCHLIST.name) }
@@ -271,6 +282,32 @@ fun ProfileScreen(
                     ) {
                         items(selectedCards, key = { it.id }) { entry ->
                             SavedAnimeCard(entry, onAnimeClick)
+                        }
+                    }
+                }
+            }
+
+            item {
+                ProfileSectionTitle(
+                    "Downloads",
+                    "Episodes saved on this device for offline viewing",
+                )
+            }
+            if (episodeDownloads.isEmpty()) {
+                item { EmptyPanel("Download a native-stream episode from its watch page") }
+            } else {
+                item {
+                    LazyRow(
+                        modifier = Modifier.focusGroup(),
+                        contentPadding = PaddingValues(horizontal = device.pagePadding),
+                        horizontalArrangement = Arrangement.spacedBy(if (device.isTv) 18.dp else 12.dp),
+                    ) {
+                        items(episodeDownloads, key = EpisodeDownload::id) { download ->
+                            EpisodeDownloadCard(
+                                download = download,
+                                onPlay = { onPlayDownload(download.id) },
+                                onRemove = { EpisodeDownloads.remove(context, download.id) },
+                            )
                         }
                     }
                 }
@@ -532,6 +569,124 @@ private fun ProfileSectionTitle(title: String, subtitle: String) {
 }
 
 @Composable
+private fun EpisodeDownloadCard(
+    download: EpisodeDownload,
+    onPlay: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val device = LocalAppDeviceProfile.current
+    val shape = RoundedCornerShape(12.dp)
+    Surface(
+        modifier = Modifier
+            .width(if (device.isTv) 320.dp else 270.dp)
+            .focusHighlight(shape),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Column {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+            ) {
+                AsyncImage(
+                    model = download.metadata.artworkUrl,
+                    contentDescription = download.metadata.seriesTitle,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0.4f to Color.Transparent,
+                                1f to Color.Black.copy(alpha = 0.82f),
+                            ),
+                        ),
+                )
+                Text(
+                    "EP ${download.metadata.episodeNumber} · ${download.metadata.category.uppercase()}",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
+                )
+                if (download.isComplete) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = "Downloaded",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
+                    )
+                }
+            }
+            Column(
+                Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text(
+                    download.metadata.seriesTitle,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    download.metadata.episodeTitle?.takeIf(String::isNotBlank)
+                        ?: "Episode ${download.metadata.episodeNumber}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (download.isActive) {
+                    LinearProgressIndicator(
+                        progress = { (download.percent ?: 0f) / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Text(
+                    listOfNotNull(
+                        download.state.displayLabel(download.percent),
+                        download.bytesDownloaded.takeIf { it > 0 }?.let(::formatDownloadBytes),
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (download.state == EpisodeDownloadState.FAILED) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (download.isComplete) {
+                        TextButton(onClick = onPlay) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Text("Play", modifier = Modifier.padding(start = 4.dp))
+                        }
+                    } else {
+                        Icon(
+                            Icons.Default.Download,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = onRemove) {
+                        Icon(Icons.Default.Delete, contentDescription = "Remove download")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun HistoryCard(entry: HistoryEntry, onResume: (HistoryEntry) -> Unit) {
     val device = LocalAppDeviceProfile.current
     Column(Modifier.width(device.posterWidth).focusHighlight().clickable { onResume(entry) }) {
@@ -547,6 +702,22 @@ private fun HistoryCard(entry: HistoryEntry, onResume: (HistoryEntry) -> Unit) {
         Text(entry.title, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp))
         Text("EP ${entry.episodeLabel}  ·  ${entry.provider}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+private fun EpisodeDownloadState.displayLabel(percent: Float?): String = when (this) {
+    EpisodeDownloadState.QUEUED -> "Queued"
+    EpisodeDownloadState.DOWNLOADING -> percent?.let { "Downloading ${it.toInt()}%" } ?: "Downloading"
+    EpisodeDownloadState.COMPLETED -> "Available offline"
+    EpisodeDownloadState.FAILED -> "Download failed"
+    EpisodeDownloadState.REMOVING -> "Removing"
+    EpisodeDownloadState.RESTARTING -> "Restarting"
+    EpisodeDownloadState.STOPPED -> "Waiting"
+}
+
+private fun formatDownloadBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024 * 1024 -> String.format(Locale.US, "%.1f GB", bytes / (1024.0 * 1024 * 1024))
+    bytes >= 1024L * 1024 -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024))
+    else -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
 }
 
 @Composable

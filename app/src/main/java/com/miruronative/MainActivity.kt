@@ -111,6 +111,7 @@ import com.miruronative.ui.settings.SettingsScreen
 import com.miruronative.ui.settings.UpdatePromptHost
 import com.miruronative.ui.theme.MiruroTheme
 import com.miruronative.ui.watch.WatchScreen
+import com.miruronative.ui.watch.DownloadedEpisodeScreen
 import com.miruronative.playback.PlaybackStatus
 import com.miruronative.playback.PlaybackService
 import kotlinx.coroutines.delay
@@ -647,11 +648,29 @@ private fun AppNavHost(
                     onResume = { e ->
                         nav.navigate(Routes.watch(e.anilistId, e.provider, e.category, e.episodeLabel))
                     },
+                    onPlayDownload = { downloadId ->
+                        nav.navigate(Routes.download(downloadId))
+                    },
                 )
             }
             composable(Routes.SETTINGS) {
                 LaunchedEffect(Unit) { DiagnosticsLog.event("Route SETTINGS content entered") }
                 SettingsScreen()
+            }
+
+            composable(
+                route = Routes.DOWNLOAD,
+                arguments = listOf(navArgument(Routes.Arg.DOWNLOAD_ID) { type = NavType.StringType }),
+            ) { entry ->
+                val downloadId = entry.arguments?.getString(Routes.Arg.DOWNLOAD_ID)
+                    ?: return@composable
+                LaunchedEffect(downloadId) {
+                    DiagnosticsLog.event("Route DOWNLOAD content entered id=$downloadId")
+                }
+                DownloadedEpisodeScreen(
+                    downloadId = downloadId,
+                    onBack = { nav.popBackStack() },
+                )
             }
 
             composable(

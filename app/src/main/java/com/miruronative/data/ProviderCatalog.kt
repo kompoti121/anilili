@@ -16,6 +16,13 @@ object ProviderCatalog {
     )
     private val miruroEmbed = setOf("nun", "bun", "twin", "cog", "telli")
 
+    /**
+     * Miruro providers whose source response can include a separate download page. This mirrors
+     * the live provider capability map; the current provider is also checked dynamically because
+     * Miruro can change the map between app releases.
+     */
+    private val externalDownloadProviders = setOf("bonk", "kiwi", "ally", "moo")
+
     // Anivexa providers we query (reliable, self-hosted sources).
     val anivexaProviders = listOf(
         "senshi", "anibd", "anikoto", "kaa", "allanime", "animekai", "reanime", "anizone", "animegg", "anineko", "2dhive",
@@ -52,6 +59,7 @@ object ProviderCatalog {
         (miruroOrder - miruroEmbed).toSet() + fastAnivexaProviders
 
     fun isFast(provider: String): Boolean = provider in fastProviders
+    fun supportsExternalDownloads(provider: String): Boolean = provider in externalDownloadProviders
 
     // Default row order: bonk (Miruro pipe) then anibd (Anivexa) lead as the two default
     // sources — independent backends, both fast and reliable — with senshi right behind.

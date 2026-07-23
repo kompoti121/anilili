@@ -48,6 +48,8 @@ class CoreModelsTest {
     fun providerCatalogKeepsKnownMiruroProvidersAheadOfNativeFallbacks() {
         assertTrue(ProviderCatalog.sortKey("bonk") < ProviderCatalog.sortKey("anikoto"))
         assertEquals("Bonk", ProviderCatalog.label("bonk"))
+        assertTrue(ProviderCatalog.supportsExternalDownloads("bonk"))
+        assertTrue(ProviderCatalog.supportsExternalDownloads("kiwi"))
     }
 
     @Test

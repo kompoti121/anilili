@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">Anilili</string>
+    <string name="download_notification_channel_name">Episode downloads</string>
+    <string name="download_notification_channel_description">Progress for episodes saved for offline viewing</string>
     <string name="diagnostics_shortcut_short">Diagnostics</string>
     <string name="diagnostics_shortcut_long">Share diagnostics</string>
     <string name="diagnostics_shortcut_disabled">Diagnostics are unavailable</string>

@@ -1,11 +1,19 @@
 package com.miruronative.ui.watch
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.view.KeyEvent as AndroidKeyEvent
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -41,11 +49,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -92,6 +103,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.miruronative.data.ProviderCatalog
@@ -101,6 +113,11 @@ import com.miruronative.data.model.Category
 import com.miruronative.data.model.EpisodeItem
 import com.miruronative.data.model.StreamItem
 import com.miruronative.diagnostics.DiagnosticsLog
+import com.miruronative.playback.EpisodeDownload
+import com.miruronative.playback.EpisodeDownloadMetadata
+import com.miruronative.playback.EpisodeDownloadState
+import com.miruronative.playback.EpisodeDownloadSubtitle
+import com.miruronative.playback.EpisodeDownloads
 import com.miruronative.playback.PlaybackService
 import com.miruronative.data.settings.EpisodeLayout
 import com.miruronative.data.settings.SettingsStore
@@ -336,7 +353,79 @@ private fun WatchContent(
     onPlaybackStopperChanged: (((() -> Unit)?) -> Unit)? = null,
     onPlayerClosed: () -> Unit = {},
 ) {
+    val context = LocalContext.current
     val device = LocalAppDeviceProfile.current
+    val downloads by EpisodeDownloads.downloads(context).collectAsState()
+    val preparingIds by EpisodeDownloads.preparingIds.collectAsState()
+    val downloadId = EpisodeDownloads.idFor(
+        data.anilistId,
+        data.category.api,
+        data.current.displayNumber,
+    )
+    val episodeDownload = downloads.firstOrNull { it.id == downloadId }
+    val streamForDownload = data.chosenStream?.takeIf(EpisodeDownloads::canDownload)
+    val downloadPreparing = downloadId in preparingIds
+    var pendingDownloadAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val action = pendingDownloadAction
+        pendingDownloadAction = null
+        if (granted) {
+            action?.invoke()
+        } else {
+            Toast.makeText(
+                context,
+                "Notification permission is needed for background downloads.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+    val queueCurrentEpisode: () -> Unit = {
+        streamForDownload?.let { stream ->
+            val enqueue = {
+                EpisodeDownloads.enqueue(
+                    context = context,
+                    metadata = EpisodeDownloadMetadata(
+                        anilistId = data.anilistId,
+                        seriesTitle = data.seriesTitle,
+                        episodeNumber = data.current.displayNumber,
+                        episodeTitle = data.current.title,
+                        artworkUrl = data.artworkUrl,
+                        provider = data.provider,
+                        category = data.category.api,
+                        referer = stream.referer,
+                        headers = stream.headers,
+                        subtitles = data.sources.subtitles.map { subtitle ->
+                            EpisodeDownloadSubtitle(
+                                url = subtitle.url,
+                                label = subtitle.label,
+                                language = subtitle.language,
+                            )
+                        },
+                    ),
+                    stream = stream,
+                ) { result ->
+                    val message = result.fold(
+                        onSuccess = { "Episode added to downloads." },
+                        onFailure = { it.message ?: "Could not start the download." },
+                    )
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                }
+            }
+            if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                pendingDownloadAction = enqueue
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                enqueue()
+            }
+        }
+        Unit
+    }
     val summaryFocus = remember { FocusRequester() }
     val sourceFocus = remember { FocusRequester() }
     val tvEpisodeListState = rememberLazyListState()
@@ -570,6 +659,10 @@ private fun WatchContent(
                 data = data,
                 saved = saved,
                 onToggleSaved = onToggleSaved,
+                episodeDownload = episodeDownload,
+                downloadPreparing = downloadPreparing,
+                canDownload = streamForDownload != null,
+                onDownload = queueCurrentEpisode,
                 focusRequester = sourceFocus,
                 onChangeSource = onChangeSource,
                 onChangeCategory = onChangeCategory,
@@ -612,6 +705,10 @@ private fun WatchContent(
                     data = data,
                     saved = saved,
                     onToggleSaved = onToggleSaved,
+                    episodeDownload = episodeDownload,
+                    downloadPreparing = downloadPreparing,
+                    canDownload = streamForDownload != null,
+                    onDownload = queueCurrentEpisode,
                     focusRequester = summaryFocus,
                     nextFocusRequester = sourceFocus,
                     modifier = Modifier.padding(
@@ -709,12 +806,23 @@ private fun WatchEpisodeSummary(
     data: WatchData,
     saved: Boolean,
     onToggleSaved: () -> Unit,
+    episodeDownload: EpisodeDownload?,
+    downloadPreparing: Boolean,
+    canDownload: Boolean,
+    onDownload: () -> Unit,
     focusRequester: FocusRequester? = null,
     nextFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val description = remember(data.anilistId, data.description) {
         data.description?.cleanAniListDescription().orEmpty()
+    }
+    val providerDownloadUrl = remember(data.sources.download) {
+        data.sources.download?.trim()?.takeIf { url ->
+            val uri = runCatching { Uri.parse(url) }.getOrNull()
+            uri?.scheme.equals("https", ignoreCase = true) && !uri?.host.isNullOrBlank()
+        }
     }
     var descriptionExpanded by remember(data.anilistId, data.current.number) { mutableStateOf(false) }
     val canExpand = description.length > 180
@@ -845,6 +953,80 @@ private fun WatchEpisodeSummary(
                     )
                 }
             }
+            val hasNativeDownloadAction = canDownload || episodeDownload != null || downloadPreparing
+            if (providerDownloadUrl != null) {
+                IconButton(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(providerDownloadUrl)),
+                            )
+                        }.onFailure {
+                            Toast.makeText(
+                                context,
+                                "No app can open these download options.",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                    },
+                    modifier = Modifier.focusHighlight(CircleShape),
+                ) {
+                    Icon(
+                        imageVector = if (hasNativeDownloadAction) {
+                            Icons.Default.OpenInNew
+                        } else {
+                            Icons.Default.Download
+                        },
+                        contentDescription = "Open provider download options",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            if (hasNativeDownloadAction) {
+                val downloadEnabled = canDownload &&
+                    !downloadPreparing &&
+                    (episodeDownload == null || episodeDownload.state == EpisodeDownloadState.FAILED)
+                val downloadDescription = when {
+                    downloadPreparing -> "Preparing episode download"
+                    episodeDownload?.state == EpisodeDownloadState.COMPLETED -> "Episode downloaded"
+                    episodeDownload?.state == EpisodeDownloadState.DOWNLOADING -> {
+                        val progress = episodeDownload.percent?.toInt()
+                        if (progress != null) "Downloading episode, $progress percent"
+                        else "Downloading episode"
+                    }
+                    episodeDownload?.state == EpisodeDownloadState.QUEUED -> "Episode download queued"
+                    episodeDownload?.state == EpisodeDownloadState.FAILED -> "Retry episode download"
+                    episodeDownload?.state == EpisodeDownloadState.REMOVING -> "Removing episode download"
+                    else -> "Download episode"
+                }
+                IconButton(
+                    onClick = onDownload,
+                    enabled = downloadEnabled,
+                    modifier = Modifier.focusHighlight(CircleShape),
+                ) {
+                    when {
+                        downloadPreparing || episodeDownload?.state == EpisodeDownloadState.DOWNLOADING -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .semantics { contentDescription = downloadDescription },
+                                strokeWidth = 2.dp,
+                            )
+                        }
+                        episodeDownload?.state == EpisodeDownloadState.COMPLETED -> {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = downloadDescription,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        else -> Icon(
+                            Icons.Default.Download,
+                            contentDescription = downloadDescription,
+                        )
+                    }
+                }
+            }
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -925,6 +1107,10 @@ private fun MobileWatchDetails(
     data: WatchData,
     saved: Boolean,
     onToggleSaved: () -> Unit,
+    episodeDownload: EpisodeDownload?,
+    downloadPreparing: Boolean,
+    canDownload: Boolean,
+    onDownload: () -> Unit,
     focusRequester: FocusRequester,
     onChangeSource: (String, String) -> Unit,
     onChangeCategory: (String) -> Unit,
@@ -958,6 +1144,10 @@ private fun MobileWatchDetails(
                     data = data,
                     saved = saved,
                     onToggleSaved = onToggleSaved,
+                    episodeDownload = episodeDownload,
+                    downloadPreparing = downloadPreparing,
+                    canDownload = canDownload,
+                    onDownload = onDownload,
                     modifier = Modifier.padding(start = pad, end = pad, top = 16.dp, bottom = 4.dp),
                 )
                 // Previous/Next pills removed: the player transport and the episode list below
@@ -1174,6 +1364,8 @@ private fun SourceSelectors(
         CompactClickablePill(
             label = ProviderCatalog.label(data.provider) +
                 if (data.provider == data.preferredProvider) " ★" else "",
+            downloadable = ProviderCatalog.supportsExternalDownloads(data.provider) ||
+                !data.sources.download.isNullOrBlank(),
             enabled = servers.isNotEmpty(),
             focusRequester = focusRequester,
             onClick = { showServerDialog = true }
@@ -1322,6 +1514,8 @@ private fun SourceSelectors(
                                 rowCells.forEachIndexed { columnIndex, server ->
                                     val selected = server == data.provider
                                     val preferred = server == data.preferredProvider
+                                    val downloadable = ProviderCatalog.supportsExternalDownloads(server) ||
+                                        (server == data.provider && !data.sources.download.isNullOrBlank())
                                     val bg = when {
                                         selected -> MaterialTheme.colorScheme.primary
                                         else -> MaterialTheme.colorScheme.surfaceVariant
@@ -1383,6 +1577,14 @@ private fun SourceSelectors(
                                                         Icons.Default.Bolt,
                                                         contentDescription = "Fast server",
                                                         tint = if (selected) textColor else FastServerColor,
+                                                        modifier = Modifier.size(14.dp),
+                                                    )
+                                                }
+                                                if (downloadable) {
+                                                    Icon(
+                                                        Icons.Default.Download,
+                                                        contentDescription = "Download available",
+                                                        tint = if (selected) textColor else MaterialTheme.colorScheme.primary,
                                                         modifier = Modifier.size(14.dp),
                                                     )
                                                 }
@@ -1494,6 +1696,8 @@ private fun MobileServerPickerContent(
                     rowServers.forEach { server ->
                         val selected = server == data.provider
                         val preferred = server == data.preferredProvider
+                        val downloadable = ProviderCatalog.supportsExternalDownloads(server) ||
+                            (server == data.provider && !data.sources.download.isNullOrBlank())
                         val textColor = if (selected) MaterialTheme.colorScheme.onPrimary
                             else MaterialTheme.colorScheme.onSurface
                         Column(
@@ -1536,6 +1740,18 @@ private fun MobileServerPickerContent(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                if (downloadable) {
+                                    Icon(
+                                        Icons.Default.Download,
+                                        contentDescription = "Download available",
+                                        tint = if (selected) {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
+                                        },
+                                        modifier = Modifier.size(15.dp),
+                                    )
+                                }
                                 if (selected) {
                                     Icon(
                                         Icons.Default.Check,
@@ -1592,6 +1808,7 @@ private fun CompactClickablePill(
     focusRequester: FocusRequester? = null,
     active: Boolean = false,
     showArrow: Boolean = true,
+    downloadable: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -1624,6 +1841,20 @@ private fun CompactClickablePill(
             .padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (downloadable) {
+            Icon(
+                Icons.Default.Download,
+                contentDescription = "Download available",
+                tint = if (active) {
+                    MaterialTheme.colorScheme.onPrimary
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+                modifier = Modifier
+                    .padding(end = 5.dp)
+                    .size(15.dp),
+            )
+        }
         Text(
             label,
             style = MaterialTheme.typography.bodyMedium,

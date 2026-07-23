@@ -18,6 +18,7 @@ import androidx.media3.cast.CastPlayer
 import androidx.media3.cast.SessionAvailabilityListener
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cronet.CronetDataSource
@@ -85,8 +86,15 @@ class PlaybackService : MediaSessionService() {
             .setCache(MediaCache.get(this))
             .setUpstreamDataSourceFactory(upstreamDataSource)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        val downloadedOrStreamingDataSource = EpisodeDownloads.readOnlyPlaybackFactory(
+            this,
+            cacheDataSource,
+        )
+        val localAwareDataSource = DefaultDataSource.Factory(this, downloadedOrStreamingDataSource)
         val playbackDataSource = DataSource.Factory {
-            FlixcloudPlaylistDataSource(cacheDataSource.createDataSource()) { activePlaylistKey }
+            FlixcloudPlaylistDataSource(localAwareDataSource.createDataSource()) {
+                activePlaylistKey
+            }
         }
 
         // Fire TV sticks have ~1GB of RAM and were getting killed by the low-memory killer mid

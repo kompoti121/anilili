@@ -72,6 +72,11 @@ else:
 }
 ```
 
+`download` is a provider-hosted quality picker (often exposing 1080p/720p/480p MP4 links), not
+the HLS manifest itself. The app opens it as a separate download option while retaining Media3
+for native offline HLS downloads. Match Miruro's client rewrite for legacy AnimePahe links:
+`https://pahe.win/...` → `https://orange-leaf-cefa.asd-968.workers.dev/...`.
+
 Playback rules (from the `/providers` capability map):
 
 - **Native HLS providers** — `kiwi, pewe, bonk, bee, ally, moo, hop` → ExoPlayer/Media3.

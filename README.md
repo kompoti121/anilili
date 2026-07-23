@@ -39,6 +39,9 @@ streams play with ExoPlayer; embed providers and fallback playback use WebView.
 - Multi-provider stream discovery across Miruro, AniKoto, ReAnime, AniZone, AnimeGG,
   AniNeko, and 2DHive.
 - Native HLS playback with subtitles, skip intro, and auto advance.
+- Background native-HLS episode downloads with external subtitle tracks, progress, offline
+  playback, and removal from the Library screen.
+- Miruro provider download options, with source badges showing which servers expose them.
 - WebView playback for embed providers and fallback player routes.
 - AniList or MyAnimeList login with watching, planning, paused, and completed list views.
 - Watch history, continue-watching resume positions, local watchlist, and optional
@@ -100,6 +103,9 @@ arm64 split and hit "app not compatible with this device".
 
 ## Notes
 
+- Native offline downloads are available for HLS sources such as AniKoto/MegaPlay. When Miruro
+  reports a separate provider download page, the episode screen also exposes its available MP4
+  quality options in the browser.
 - `local.properties`, build output, IDE files, Graphify output, temporary folders, and old API
   bundles are intentionally ignored.
 - The showcase folder is intentionally limited to the six mobile screenshots shown above.

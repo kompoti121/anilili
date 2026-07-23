@@ -16,6 +16,8 @@ object Routes {
     val tabRoutes = setOf(HOME, SEARCH, SCHEDULE, MORE, SETTINGS)
 
     const val NOTIFICATIONS = "notifications"
+    const val DOWNLOAD = "download/{downloadId}"
+    fun download(downloadId: String) = "download/${Uri.encode(downloadId)}"
 
     const val DETAIL = "detail/{id}"
     fun detail(id: Int) = "detail/$id"
@@ -52,5 +54,6 @@ object Routes {
         const val CATEGORY = "category"
         const val EPISODE = "episode"
         const val SHOW_EPISODES = "showEpisodes"
+        const val DOWNLOAD_ID = "downloadId"
     }
 }

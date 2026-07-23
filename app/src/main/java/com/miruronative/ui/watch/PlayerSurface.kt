@@ -95,6 +95,7 @@ import com.miruronative.data.settings.DefaultQuality
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.playback.PlaybackService
+import com.miruronative.playback.EpisodeDownloads
 import com.miruronative.playback.SubtitleDelay
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
@@ -216,6 +217,7 @@ fun PlayerSurface(
     focusPlayerOnStart: Boolean = true,
     isFullscreen: Boolean = false,
     subtitleOffsetMs: Long = 0L,
+    notificationRoute: String? = null,
 ) {
     val context = LocalContext.current
     val device = LocalAppDeviceProfile.current
@@ -370,7 +372,7 @@ fun PlayerSurface(
             activeStream.headers,
             activeStream.avoidCronet,
         )
-        val watchRoute = Routes.watch(animeId, provider, category, episode)
+        val watchRoute = notificationRoute ?: Routes.watch(animeId, provider, category, episode)
         val metadata = MediaMetadata.Builder()
             .setTitle(episodeTitle)
             .setArtist(seriesTitle)
@@ -379,7 +381,7 @@ fun PlayerSurface(
                 putString(PlaybackService.EXTRA_WATCH_ROUTE, watchRoute)
             })
             .build()
-        val item = MediaItem.Builder()
+        val itemBuilder = MediaItem.Builder()
             .setMediaId(activeStream.url)
             .setUri(activeStream.url)
             .setMediaMetadata(metadata)
@@ -401,7 +403,7 @@ fun PlayerSurface(
                         .build()
                 },
             )
-            .build()
+        val item = EpisodeDownloads.buildMediaItem(context, activeStream.url, itemBuilder)
         activeController.setMediaItem(item, nextStartPositionMs.coerceAtLeast(0))
         activeController.prepare()
         activeController.playWhenReady = true
@@ -1400,6 +1402,9 @@ private fun androidx.media3.common.Tracks.diagnosticSummary(): String = groups
 private fun mimeFor(url: String): String = when {
     url.contains(".vtt", ignoreCase = true) -> MimeTypes.TEXT_VTT
     url.contains(".srt", ignoreCase = true) -> MimeTypes.APPLICATION_SUBRIP
-    url.contains(".ass", ignoreCase = true) -> MimeTypes.TEXT_SSA
+    url.contains(".ass", ignoreCase = true) || url.contains(".ssa", ignoreCase = true) ->
+        MimeTypes.TEXT_SSA
+    url.contains(".ttml", ignoreCase = true) || url.contains(".xml", ignoreCase = true) ->
+        MimeTypes.APPLICATION_TTML
     else -> MimeTypes.TEXT_VTT
 }

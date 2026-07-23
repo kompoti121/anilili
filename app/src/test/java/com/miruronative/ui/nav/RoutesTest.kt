@@ -34,6 +34,12 @@ class RoutesTest {
     }
 
     @Test
+    fun `download player is a child destination`() {
+        assertEquals("download/{downloadId}", Routes.DOWNLOAD)
+        assertFalse(Routes.DOWNLOAD in Routes.tabRoutes)
+    }
+
+    @Test
     fun `home clears child routes while secondary tabs restore their state`() {
         assertFalse(Routes.shouldRestoreTabState(Routes.HOME))
         assertTrue(Routes.shouldRestoreTabState(Routes.SEARCH))

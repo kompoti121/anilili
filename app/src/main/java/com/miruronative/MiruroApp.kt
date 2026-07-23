@@ -21,6 +21,7 @@ import com.miruronative.data.reminder.AutomaticReleaseManager
 import com.miruronative.data.reminder.AniListNotificationPushManager
 import com.miruronative.data.reminder.ReleaseSyncScheduler
 import com.miruronative.diagnostics.DiagnosticsLog
+import com.miruronative.playback.EpisodeDownloads
 
 class MiruroApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
@@ -39,6 +40,8 @@ class MiruroApp : Application(), ImageLoaderFactory {
             DiagnosticsLog.event("MiruroApp diagnostics process; skipping normal app init")
             return
         }
+        runCatching { EpisodeDownloads.initialize(this) }
+            .onFailure { DiagnosticsLog.throwable("EpisodeDownloads initialization failed", it) }
         if (BuildConfig.DEBUG) {
             StrictMode.setThreadPolicy(
                 StrictMode.ThreadPolicy.Builder().detectAll().penaltyLog().build(),
