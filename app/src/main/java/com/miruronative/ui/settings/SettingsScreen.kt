@@ -1,7 +1,10 @@
 package com.miruronative.ui.settings
 
 import android.Manifest
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -63,6 +66,8 @@ import com.miruronative.data.library.MalExportFile
 import com.miruronative.data.reminder.AutomaticReleaseManager
 import com.miruronative.data.reminder.ReleaseSyncScheduler
 import com.miruronative.data.settings.DefaultQuality
+import com.miruronative.data.settings.DownloadDestination
+import com.miruronative.data.settings.DownloadQuality
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.data.settings.MenuLanguage
 import com.miruronative.data.update.UpdateManager
@@ -97,6 +102,8 @@ fun SettingsScreen(
     val autoSync by SettingsStore.autoSyncAniList.collectAsState()
     val preferDub by SettingsStore.preferDub.collectAsState()
     val defaultQuality by SettingsStore.defaultQuality.collectAsState()
+    val downloadQuality by SettingsStore.downloadQuality.collectAsState()
+    val downloadDestination by SettingsStore.downloadDestination.collectAsState()
     val releaseNotifications by SettingsStore.releaseNotifications.collectAsState()
     val hideAdultContent by SettingsStore.hideAdultContent.collectAsState()
     val subtitlesWithDub by SettingsStore.subtitlesWithDub.collectAsState()
@@ -295,6 +302,22 @@ fun SettingsScreen(
             }
             item { SectionDivider() }
 
+            item { SettingsSectionTitle("Downloads") }
+            item {
+                DownloadQualitySetting(
+                    selected = downloadQuality,
+                    onSelect = SettingsStore::setDownloadQuality,
+                )
+            }
+            item {
+                DownloadDestinationSetting(
+                    selected = downloadDestination,
+                    deviceDownloadsSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
+                    onSelect = SettingsStore::setDownloadDestination,
+                )
+            }
+            item { SectionDivider() }
+
             item { SettingsSectionTitle("Content") }
             item {
                 SettingSwitch(
@@ -478,6 +501,14 @@ fun SettingsScreen(
             item { SectionDivider() }
             item {
                 SettingsAction(
+                    title = "Share Anilili with friends",
+                    icon = { Icon(Icons.Default.Share, contentDescription = null) },
+                    enabled = true,
+                    onClick = { shareAnilili(context, openWebsite = device.isTv) },
+                )
+            }
+            item {
+                SettingsAction(
                     title = "Join Telegram Group",
                     icon = { Icon(painterResource(R.drawable.ic_telegram), contentDescription = null) },
                     enabled = true,
@@ -503,6 +534,29 @@ fun SettingsScreen(
                 )
             }
         }
+    }
+}
+
+private const val ANILILI_WEBSITE = "https://kompoti121.github.io/Anilili/"
+
+private fun shareAnilili(context: Context, openWebsite: Boolean) {
+    val website = Uri.parse(ANILILI_WEBSITE)
+    if (openWebsite) {
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, website)) }
+        return
+    }
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, "Anilili anime app")
+        putExtra(
+            Intent.EXTRA_TEXT,
+            "Try Anilili for anime on Android and Android TV: $ANILILI_WEBSITE",
+        )
+    }
+    runCatching {
+        context.startActivity(Intent.createChooser(send, "Share Anilili"))
+    }.onFailure {
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, website)) }
     }
 }
 
@@ -534,6 +588,81 @@ private fun DefaultQualitySetting(
                     selected = selected == quality,
                     onClick = { onSelect(quality) },
                     label = { Text(quality.label) },
+                    modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DownloadQualitySetting(
+    selected: DownloadQuality,
+    onSelect: (DownloadQuality) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Text(
+            "Default download resolution",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+        )
+        Text(
+            "Limits the saved HLS rendition; direct video files keep their source resolution",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 6.dp),
+        ) {
+            DownloadQuality.entries.forEach { quality ->
+                FilterChip(
+                    selected = selected == quality,
+                    onClick = { onSelect(quality) },
+                    label = { Text(quality.label) },
+                    modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DownloadDestinationSetting(
+    selected: DownloadDestination,
+    deviceDownloadsSupported: Boolean,
+    onSelect: (DownloadDestination) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Text(
+            "Default download destination",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+        )
+        Text(
+            if (deviceDownloadsSupported) {
+                "Device Downloads and Both are offered for direct MP4 sources. HLS stays in Anilili."
+            } else {
+                "Public device downloads require Android 10 or newer. HLS stays in Anilili."
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 6.dp),
+        ) {
+            DownloadDestination.entries.forEach { destination ->
+                val enabled = deviceDownloadsSupported || destination == DownloadDestination.APP_ONLY
+                FilterChip(
+                    selected = selected == destination && enabled,
+                    onClick = { onSelect(destination) },
+                    enabled = enabled,
+                    label = { Text(destination.label) },
                     modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
                 )
             }

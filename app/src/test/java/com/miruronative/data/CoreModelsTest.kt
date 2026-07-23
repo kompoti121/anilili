@@ -5,6 +5,7 @@ import com.miruronative.data.library.WatchlistEntry
 import com.miruronative.data.library.mediaListStatusLabel
 import com.miruronative.data.library.mergeWatchlistEntries
 import com.miruronative.data.library.remoteListStatuses
+import com.miruronative.data.library.sortHistoryLatestFirst
 import com.miruronative.data.model.Media
 import com.miruronative.data.model.MediaListEntry
 import com.miruronative.data.model.MediaRelationConnection
@@ -42,6 +43,17 @@ class CoreModelsTest {
         assertEquals("3", entry.episodeLabel)
         assertEquals(.75f, entry.progressFraction)
         assertTrue(entry.copy(positionMs = 200_000).progressFraction <= 1f)
+    }
+
+    @Test
+    fun watchHistoryIsSortedWithLatestPlaybackFirst() {
+        val entries = listOf(
+            HistoryEntry(1, "Earliest", null, 1.0, provider = "bonk", category = "sub", updatedAt = 100),
+            HistoryEntry(2, "Latest", null, 2.0, provider = "bonk", category = "sub", updatedAt = 300),
+            HistoryEntry(3, "Middle", null, 3.0, provider = "bonk", category = "sub", updatedAt = 200),
+        )
+
+        assertEquals(listOf(2, 3, 1), sortHistoryLatestFirst(entries).map(HistoryEntry::anilistId))
     }
 
     @Test

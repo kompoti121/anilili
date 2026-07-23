@@ -73,6 +73,39 @@ enum class DefaultQuality(val storedValue: String, val label: String) {
     }
 }
 
+/** Maximum video rendition kept in an offline download. */
+enum class DownloadQuality(
+    val storedValue: String,
+    val label: String,
+    val maxHeight: Int?,
+) {
+    BEST("best", "Best available", null),
+    P1080("1080", "1080p", 1080),
+    P720("720", "720p", 720),
+    P480("480", "480p", 480),
+    P360("360", "360p", 360);
+
+    companion object {
+        fun fromStored(value: String?): DownloadQuality =
+            entries.firstOrNull { it.storedValue == value } ?: BEST
+    }
+}
+
+/** Where a direct-file episode should be saved. HLS always remains in the offline library. */
+enum class DownloadDestination(val storedValue: String, val label: String) {
+    APP_ONLY("app", "Anilili library"),
+    DEVICE_ONLY("device", "Device Downloads"),
+    BOTH("both", "Both");
+
+    val includesApp: Boolean get() = this != DEVICE_ONLY
+    val includesDevice: Boolean get() = this != APP_ONLY
+
+    companion object {
+        fun fromStored(value: String?): DownloadDestination =
+            entries.firstOrNull { it.storedValue == value } ?: APP_ONLY
+    }
+}
+
 /**
  * The quality to use before the viewer has chosen one. TV sticks start adaptive: pinning the
  * highest rendition turns ABR off, so a hardware decoder that gets preempted or falls behind has
@@ -126,6 +159,12 @@ object SettingsStore {
 
     private val _defaultQuality = MutableStateFlow(deviceDefaultQuality())
     val defaultQuality = _defaultQuality.asStateFlow()
+
+    private val _downloadQuality = MutableStateFlow(DownloadQuality.BEST)
+    val downloadQuality = _downloadQuality.asStateFlow()
+
+    private val _downloadDestination = MutableStateFlow(DownloadDestination.APP_ONLY)
+    val downloadDestination = _downloadDestination.asStateFlow()
 
     // Set once and expected to stick: the viewer who wants dense number chips for a long-runner
     // wants them on the next screen too, not just until they navigate away.
@@ -181,6 +220,16 @@ object SettingsStore {
     fun setDefaultQuality(value: DefaultQuality) {
         _defaultQuality.value = value
         scope.launch { store.edit { it[DEFAULT_QUALITY] = value.storedValue } }
+    }
+
+    fun setDownloadQuality(value: DownloadQuality) {
+        _downloadQuality.value = value
+        scope.launch { store.edit { it[DOWNLOAD_QUALITY] = value.storedValue } }
+    }
+
+    fun setDownloadDestination(value: DownloadDestination) {
+        _downloadDestination.value = value
+        scope.launch { store.edit { it[DOWNLOAD_DESTINATION] = value.storedValue } }
     }
 
     fun setEpisodeLayout(value: EpisodeLayout) {
@@ -251,6 +300,8 @@ object SettingsStore {
         _menuLanguage.value = MenuLanguage.fromStored(prefs[MENU_LANGUAGE])
         _defaultQuality.value = prefs[DEFAULT_QUALITY]?.let(DefaultQuality::fromStored)
             ?: deviceDefaultQuality()
+        _downloadQuality.value = DownloadQuality.fromStored(prefs[DOWNLOAD_QUALITY])
+        _downloadDestination.value = DownloadDestination.fromStored(prefs[DOWNLOAD_DESTINATION])
         _episodeLayout.value = EpisodeLayout.fromStored(prefs[EPISODE_LAYOUT])
         _preferredProvider.value =
             prefs[PREFERRED_PROVIDER]?.takeIf(String::isNotBlank) ?: DEFAULT_PREFERRED_PROVIDER
@@ -291,6 +342,8 @@ object SettingsStore {
     private val CAPTION_EDGE_STYLE = stringPreferencesKey("caption_edge_style")
     private val MENU_LANGUAGE = stringPreferencesKey("menu_language")
     private val DEFAULT_QUALITY = stringPreferencesKey("default_quality")
+    private val DOWNLOAD_QUALITY = stringPreferencesKey("download_quality")
+    private val DOWNLOAD_DESTINATION = stringPreferencesKey("download_destination")
     private val EPISODE_LAYOUT = stringPreferencesKey("episode_layout")
     private val PREFERRED_PROVIDER = stringPreferencesKey("preferred_provider")
     private val MIGRATED = booleanPreferencesKey("migrated_from_shared_preferences")

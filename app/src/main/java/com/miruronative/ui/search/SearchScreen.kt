@@ -1,5 +1,6 @@
 package com.miruronative.ui.search
 
+import android.view.inputmethod.EditorInfo
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -67,11 +68,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -85,7 +81,8 @@ import com.miruronative.data.model.DiscoverOptions
 import com.miruronative.data.model.Media
 import com.miruronative.ui.UiState
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
-import com.miruronative.ui.adaptive.TvDeferredTextField
+import com.miruronative.ui.adaptive.TvNativeTextField
+import com.miruronative.ui.adaptive.TvTextInputType
 import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.components.AnimeCard
 import com.miruronative.ui.components.ErrorBox
@@ -222,30 +219,29 @@ private fun SearchTopBar(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TvDeferredTextField(
-                    modifier = Modifier.weight(1f).widthIn(min = 0.dp, max = 720.dp),
-                    tvFocusRequester = tvFieldFocusRequester,
-                ) { fieldModifier ->
+                if (device.isTv) {
+                    TvNativeTextField(
+                        value = vm.query,
+                        onValueChange = vm::onQueryChange,
+                        hint = "Search anime",
+                        modifier = Modifier.weight(1f).widthIn(min = 0.dp, max = 720.dp),
+                        imeAction = EditorInfo.IME_ACTION_SEARCH,
+                        onImeAction = {
+                            vm.recordCurrentSearch()
+                            focusManager.moveFocus(FocusDirection.Down)
+                        },
+                        onMoveDown = { focusManager.moveFocus(FocusDirection.Down) },
+                        tvFocusRequester = tvFieldFocusRequester,
+                    )
+                } else {
                     OutlinedTextField(
                         value = vm.query,
                         onValueChange = vm::onQueryChange,
-                        modifier = fieldModifier
+                        modifier = Modifier
+                            .weight(1f)
+                            .widthIn(min = 0.dp, max = 720.dp)
                             .fillMaxWidth()
-                            .onFocusChanged { fieldFocused = it.isFocused }
-                            // TV: the text field consumes D-pad Down for cursor handling, so
-                            // focus can never escape into the results. Hand it off manually.
-                            .onPreviewKeyEvent { event ->
-                                if (device.isTv &&
-                                    event.type == KeyEventType.KeyDown &&
-                                    event.key == Key.DirectionDown
-                                ) {
-                                    keyboard?.hide()
-                                    focusManager.moveFocus(FocusDirection.Down)
-                                    true
-                                } else {
-                                    false
-                                }
-                            },
+                            .onFocusChanged { fieldFocused = it.isFocused },
                         placeholder = { Text("Search anime…") },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                         trailingIcon = {
@@ -531,6 +527,7 @@ private fun FilterSheet(
     vm: SearchViewModel,
     onDismiss: () -> Unit,
 ) {
+    val device = LocalAppDeviceProfile.current
     val studioSuggestions by vm.studioSuggestions.collectAsState()
     val studioLookupLoading by vm.isStudioLookupLoading.collectAsState()
     val keyboard = LocalSoftwareKeyboardController.current
@@ -565,11 +562,24 @@ private fun FilterSheet(
             item { FilterSection("Sort by") { ChoiceFlow(SearchViewModel.SORTS, filters.sort, vm::setSort) } }
             item {
                 FilterSection("Studio") {
-                    TvDeferredTextField(Modifier.fillMaxWidth()) { fieldModifier ->
+                    if (device.isTv) {
+                        TvNativeTextField(
+                            value = vm.studioQuery,
+                            onValueChange = vm::onStudioQueryChange,
+                            hint = "Find a studio, for example MAPPA",
+                            modifier = Modifier.fillMaxWidth(),
+                            imeAction = EditorInfo.IME_ACTION_SEARCH,
+                            onImeAction = {
+                                vm.selectFirstStudioSuggestion()
+                                focusManager.moveFocus(FocusDirection.Down)
+                            },
+                            onMoveDown = { focusManager.moveFocus(FocusDirection.Down) },
+                        )
+                    } else {
                         OutlinedTextField(
                             value = vm.studioQuery,
                             onValueChange = vm::onStudioQueryChange,
-                            modifier = fieldModifier.fillMaxWidth().tvEscapeDown(),
+                            modifier = Modifier.fillMaxWidth(),
                             placeholder = { Text("Find a studio (for example MAPPA)") },
                             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                             trailingIcon = {
@@ -620,14 +630,26 @@ private fun FilterSheet(
             }
             item {
                 FilterSection("Release year") {
-                    TvDeferredTextField(Modifier.fillMaxWidth()) { fieldModifier ->
+                    if (device.isTv) {
+                        TvNativeTextField(
+                            value = filters.year?.toString().orEmpty(),
+                            onValueChange = { value ->
+                                val digits = value.filter(Char::isDigit).take(4)
+                                vm.setYear(digits.toIntOrNull()?.takeIf { it in 1900..2100 })
+                            },
+                            hint = "Any year, for example 2024",
+                            modifier = Modifier.fillMaxWidth(),
+                            inputType = TvTextInputType.NUMBER,
+                            onMoveDown = { focusManager.moveFocus(FocusDirection.Down) },
+                        )
+                    } else {
                         OutlinedTextField(
                             value = filters.year?.toString().orEmpty(),
                             onValueChange = { value ->
                                 val digits = value.filter(Char::isDigit).take(4)
                                 vm.setYear(digits.toIntOrNull()?.takeIf { it in 1900..2100 })
                             },
-                            modifier = fieldModifier.fillMaxWidth().tvEscapeDown(),
+                            modifier = Modifier.fillMaxWidth(),
                             placeholder = { Text("Any year (for example 2024)") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
@@ -668,11 +690,19 @@ private fun FilterSheet(
             if (options.tags.isNotEmpty()) {
                 item {
                     FilterSection("Tags") {
-                        TvDeferredTextField(Modifier.fillMaxWidth().padding(bottom = 8.dp)) { fieldModifier ->
+                        if (device.isTv) {
+                            TvNativeTextField(
+                                value = tagSearch,
+                                onValueChange = { tagSearch = it },
+                                hint = "Find a tag",
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                onMoveDown = { focusManager.moveFocus(FocusDirection.Down) },
+                            )
+                        } else {
                             OutlinedTextField(
                                 value = tagSearch,
                                 onValueChange = { tagSearch = it },
-                                modifier = fieldModifier.fillMaxWidth().tvEscapeDown(),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                                 placeholder = { Text("Find a tag") },
                                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                                 singleLine = true,
@@ -702,23 +732,6 @@ private fun FilterSheet(
                     Text("Show results", fontWeight = FontWeight.Bold)
                 }
             }
-        }
-    }
-}
-
-/** TV: text fields consume D-pad Down; hand focus to the next element manually. */
-@Composable
-private fun Modifier.tvEscapeDown(): Modifier {
-    val device = LocalAppDeviceProfile.current
-    val keyboard = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
-    return this.onPreviewKeyEvent { event ->
-        if (device.isTv && event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
-            keyboard?.hide()
-            focusManager.moveFocus(FocusDirection.Down)
-            true
-        } else {
-            false
         }
     }
 }

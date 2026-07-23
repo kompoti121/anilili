@@ -44,7 +44,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.miruronative.data.model.EpisodeItem
 import com.miruronative.data.settings.EpisodeLayout
-import com.miruronative.ui.adaptive.TvDeferredTextField
+import com.miruronative.ui.adaptive.LocalAppDeviceProfile
+import com.miruronative.ui.adaptive.TvNativeTextField
 import com.miruronative.ui.adaptive.focusHighlight
 
 /** Episodes per range block. One block is meant to be one comfortable scroll. */
@@ -210,11 +211,19 @@ private fun EpisodeFilterField(
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    TvDeferredTextField(modifier = modifier) { fieldModifier ->
+    val device = LocalAppDeviceProfile.current
+    if (device.isTv) {
+        TvNativeTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            hint = "Filter episodes",
+            modifier = modifier,
+        )
+    } else {
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
-            modifier = fieldModifier.fillMaxWidth(),
+            modifier = modifier.fillMaxWidth(),
             placeholder = { Text("Filter episodes…") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
             trailingIcon = {

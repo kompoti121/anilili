@@ -20,10 +20,14 @@ class EpisodeDownloadsTest {
     }
 
     @Test
-    fun `only native hls without playlist rewriting is downloadable`() {
+    fun `native hls and direct files without playlist rewriting are downloadable`() {
         assertTrue(EpisodeDownloads.canDownload(stream("https://cdn.example/episode/master.m3u8", "hls")))
         assertFalse(EpisodeDownloads.canDownload(stream("https://embed.example/watch/1", "embed")))
-        assertFalse(EpisodeDownloads.canDownload(stream("https://cdn.example/episode.mp4", "video/mp4")))
+        val direct = stream("https://cdn.example/episode.mp4", "video/mp4")
+        assertTrue(EpisodeDownloads.canDownload(direct))
+        assertTrue(EpisodeDownloads.canSaveToDevice(direct))
+        assertFalse(EpisodeDownloads.canSaveToDevice(stream("https://cdn.example/master.m3u8", "hls")))
+        assertFalse(EpisodeDownloads.canDownload(stream("https://cdn.example/episode.mpd", "dash")))
         assertFalse(
             EpisodeDownloads.canDownload(
                 stream("https://flixcloud.example/master.m3u8", "hls", playlistKey = "secret"),

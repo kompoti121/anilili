@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -46,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
@@ -56,10 +59,11 @@ import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.CircularProgressIndicator
@@ -119,6 +123,8 @@ import com.miruronative.playback.EpisodeDownloadState
 import com.miruronative.playback.EpisodeDownloadSubtitle
 import com.miruronative.playback.EpisodeDownloads
 import com.miruronative.playback.PlaybackService
+import com.miruronative.data.settings.DownloadDestination
+import com.miruronative.data.settings.DownloadQuality
 import com.miruronative.data.settings.EpisodeLayout
 import com.miruronative.data.settings.SettingsStore
 import com.miruronative.ui.UiState
@@ -145,6 +151,7 @@ fun WatchScreen(
     episode: String,
     showEpisodeListInitially: Boolean = false,
     inPictureInPicture: Boolean = false,
+    onPictureInPictureReadyChanged: (Boolean) -> Unit = {},
     onBack: () -> Unit,
     vm: WatchViewModel = viewModel(),
 ) {
@@ -165,6 +172,13 @@ fun WatchScreen(
     val currentOnBack by rememberUpdatedState(onBack)
     var embeddedPlaybackStopper by remember { mutableStateOf<(() -> Unit)?>(null) }
     val currentEmbeddedPlaybackStopper by rememberUpdatedState(embeddedPlaybackStopper)
+    val pictureInPictureReady = state is UiState.Success
+    DisposableEffect(pictureInPictureReady) {
+        onPictureInPictureReadyChanged(pictureInPictureReady)
+        onDispose {
+            if (pictureInPictureReady) onPictureInPictureReadyChanged(false)
+        }
+    }
     // YouTube-style leave: native playback PAUSES (media stays loaded, so the notification can
     // resume it and re-entering the episode continues in place); the position is committed past
     // the periodic-save throttle so "continue watching" lands exactly where the user left off.
@@ -364,7 +378,19 @@ private fun WatchContent(
     )
     val episodeDownload = downloads.firstOrNull { it.id == downloadId }
     val streamForDownload = data.chosenStream?.takeIf(EpisodeDownloads::canDownload)
+    val canSaveToDevice = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+        EpisodeDownloads.canSaveToDevice(streamForDownload)
     val downloadPreparing = downloadId in preparingIds
+    val defaultDownloadQuality by SettingsStore.downloadQuality.collectAsState()
+    val defaultDownloadDestination by SettingsStore.downloadDestination.collectAsState()
+    var downloadDialogVisible by remember(
+        data.anilistId,
+        data.category,
+        data.current.pipeId,
+        data.provider,
+    ) { mutableStateOf(false) }
+    var selectedDownloadQuality by remember { mutableStateOf(defaultDownloadQuality) }
+    var selectedDownloadDestination by remember { mutableStateOf(defaultDownloadDestination) }
     var pendingDownloadAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -381,39 +407,87 @@ private fun WatchContent(
             ).show()
         }
     }
-    val queueCurrentEpisode: () -> Unit = {
+    val queueCurrentEpisode: (DownloadQuality, DownloadDestination) -> Unit = queue@{ quality, destination ->
         streamForDownload?.let { stream ->
-            val enqueue = {
-                EpisodeDownloads.enqueue(
-                    context = context,
-                    metadata = EpisodeDownloadMetadata(
-                        anilistId = data.anilistId,
-                        seriesTitle = data.seriesTitle,
-                        episodeNumber = data.current.displayNumber,
-                        episodeTitle = data.current.title,
-                        artworkUrl = data.artworkUrl,
-                        provider = data.provider,
-                        category = data.category.api,
-                        referer = stream.referer,
-                        headers = stream.headers,
-                        subtitles = data.sources.subtitles.map { subtitle ->
-                            EpisodeDownloadSubtitle(
-                                url = subtitle.url,
-                                label = subtitle.label,
-                                language = subtitle.language,
-                            )
-                        },
-                    ),
-                    stream = stream,
-                ) { result ->
-                    val message = result.fold(
-                        onSuccess = { "Episode added to downloads." },
-                        onFailure = { it.message ?: "Could not start the download." },
+            val selectedStream = selectDownloadStream(
+                current = stream,
+                available = data.sources.streams,
+                quality = quality,
+            )
+            val effectiveDestination = if (canSaveToDevice) {
+                destination
+            } else {
+                DownloadDestination.APP_ONLY
+            }
+            val metadata = EpisodeDownloadMetadata(
+                anilistId = data.anilistId,
+                seriesTitle = data.seriesTitle,
+                episodeNumber = data.current.displayNumber,
+                episodeTitle = data.current.title,
+                artworkUrl = data.artworkUrl,
+                provider = data.provider,
+                category = data.category.api,
+                referer = selectedStream.referer,
+                headers = selectedStream.headers,
+                subtitles = data.sources.subtitles.map { subtitle ->
+                    EpisodeDownloadSubtitle(
+                        url = subtitle.url,
+                        label = subtitle.label,
+                        language = subtitle.language,
                     )
+                },
+            )
+            val appDownloadCanStart = episodeDownload == null ||
+                episodeDownload.state == EpisodeDownloadState.FAILED
+            val enqueue = {
+                val deviceResult = if (effectiveDestination.includesDevice) {
+                    EpisodeDownloads.enqueueDeviceDownload(
+                        context = context,
+                        metadata = metadata,
+                        stream = selectedStream,
+                    )
+                } else {
+                    null
+                }
+                if (effectiveDestination.includesApp && appDownloadCanStart) {
+                    EpisodeDownloads.enqueue(
+                        context = context,
+                        metadata = metadata,
+                        stream = selectedStream,
+                        quality = quality,
+                    ) { appResult ->
+                        val message = when {
+                            appResult.isSuccess && deviceResult?.isSuccess == true ->
+                                "Episode added to Anilili and Device Downloads."
+                            appResult.isSuccess && deviceResult?.isFailure == true ->
+                                "Added to Anilili. Device copy failed: " +
+                                    (deviceResult.exceptionOrNull()?.message ?: "unknown error")
+                            appResult.isSuccess -> "Episode added to Anilili downloads."
+                            deviceResult?.isSuccess == true ->
+                                "Device download started, but the Anilili copy failed: " +
+                                    (appResult.exceptionOrNull()?.message ?: "unknown error")
+                            else -> appResult.exceptionOrNull()?.message
+                                ?: deviceResult?.exceptionOrNull()?.message
+                                ?: "Could not start the download."
+                        }
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    val message = when {
+                        deviceResult?.isSuccess == true && effectiveDestination.includesApp ->
+                            "Device download started. This episode is already in Anilili."
+                        deviceResult?.isSuccess == true -> "Episode added to Device Downloads."
+                        deviceResult?.isFailure == true ->
+                            deviceResult.exceptionOrNull()?.message ?: "Could not start the device download."
+                        effectiveDestination.includesApp -> "This episode is already in Anilili downloads."
+                        else -> "Could not start the download."
+                    }
                     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                 }
             }
             if (
+                effectiveDestination.includesApp &&
+                appDownloadCanStart &&
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
                 PackageManager.PERMISSION_GRANTED
@@ -425,6 +499,41 @@ private fun WatchContent(
             }
         }
         Unit
+    }
+    val showDownloadDialog: () -> Unit = {
+        selectedDownloadQuality = defaultDownloadQuality
+        selectedDownloadDestination = if (canSaveToDevice) {
+            if (
+                episodeDownload?.state == EpisodeDownloadState.COMPLETED &&
+                defaultDownloadDestination == DownloadDestination.APP_ONLY
+            ) {
+                DownloadDestination.DEVICE_ONLY
+            } else {
+                defaultDownloadDestination
+            }
+        } else {
+            DownloadDestination.APP_ONLY
+        }
+        downloadDialogVisible = true
+    }
+
+    if (downloadDialogVisible && streamForDownload != null) {
+        EpisodeDownloadDialog(
+            stream = streamForDownload,
+            quality = selectedDownloadQuality,
+            destination = selectedDownloadDestination,
+            canSaveToDevice = canSaveToDevice,
+            alreadyInApp = episodeDownload?.state == EpisodeDownloadState.COMPLETED,
+            onQualityChange = { selectedDownloadQuality = it },
+            onDestinationChange = { selectedDownloadDestination = it },
+            onDismiss = { downloadDialogVisible = false },
+            onConfirm = {
+                val quality = selectedDownloadQuality
+                val destination = selectedDownloadDestination
+                downloadDialogVisible = false
+                queueCurrentEpisode(quality, destination)
+            },
+        )
     }
     val summaryFocus = remember { FocusRequester() }
     val sourceFocus = remember { FocusRequester() }
@@ -662,7 +771,8 @@ private fun WatchContent(
                 episodeDownload = episodeDownload,
                 downloadPreparing = downloadPreparing,
                 canDownload = streamForDownload != null,
-                onDownload = queueCurrentEpisode,
+                canSaveToDevice = canSaveToDevice,
+                onDownload = showDownloadDialog,
                 focusRequester = sourceFocus,
                 onChangeSource = onChangeSource,
                 onChangeCategory = onChangeCategory,
@@ -708,7 +818,8 @@ private fun WatchContent(
                     episodeDownload = episodeDownload,
                     downloadPreparing = downloadPreparing,
                     canDownload = streamForDownload != null,
-                    onDownload = queueCurrentEpisode,
+                    canSaveToDevice = canSaveToDevice,
+                    onDownload = showDownloadDialog,
                     focusRequester = summaryFocus,
                     nextFocusRequester = sourceFocus,
                     modifier = Modifier.padding(
@@ -809,6 +920,7 @@ private fun WatchEpisodeSummary(
     episodeDownload: EpisodeDownload?,
     downloadPreparing: Boolean,
     canDownload: Boolean,
+    canSaveToDevice: Boolean,
     onDownload: () -> Unit,
     focusRequester: FocusRequester? = null,
     nextFocusRequester: FocusRequester? = null,
@@ -973,7 +1085,7 @@ private fun WatchEpisodeSummary(
                 ) {
                     Icon(
                         imageVector = if (hasNativeDownloadAction) {
-                            Icons.Default.OpenInNew
+                            Icons.AutoMirrored.Filled.OpenInNew
                         } else {
                             Icons.Default.Download
                         },
@@ -983,9 +1095,11 @@ private fun WatchEpisodeSummary(
                 }
             }
             if (hasNativeDownloadAction) {
+                val appDownloadCanStart = episodeDownload == null ||
+                    episodeDownload.state == EpisodeDownloadState.FAILED
                 val downloadEnabled = canDownload &&
                     !downloadPreparing &&
-                    (episodeDownload == null || episodeDownload.state == EpisodeDownloadState.FAILED)
+                    (canSaveToDevice || appDownloadCanStart)
                 val downloadDescription = when {
                     downloadPreparing -> "Preparing episode download"
                     episodeDownload?.state == EpisodeDownloadState.COMPLETED -> "Episode downloaded"
@@ -1091,6 +1205,141 @@ private fun WatchEpisodeSummary(
 
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EpisodeDownloadDialog(
+    stream: StreamItem,
+    quality: DownloadQuality,
+    destination: DownloadDestination,
+    canSaveToDevice: Boolean,
+    alreadyInApp: Boolean,
+    onQualityChange: (DownloadQuality) -> Unit,
+    onDestinationChange: (DownloadDestination) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val confirmEnabled = !alreadyInApp ||
+        (canSaveToDevice && destination.includesDevice)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Download episode") },
+        text = {
+            Column {
+                Text(
+                    "Resolution",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 6.dp),
+                ) {
+                    DownloadQuality.entries.forEach { option ->
+                        FilterChip(
+                            selected = quality == option,
+                            onClick = { onQualityChange(option) },
+                            label = { Text(option.label) },
+                            modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
+                        )
+                    }
+                }
+                Text(
+                    if (stream.isHls) {
+                        "Anilili saves the best available rendition at or below this resolution."
+                    } else {
+                        "Direct files use the closest resolution offered by this source."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+
+                Text(
+                    "Save to",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 18.dp),
+                )
+                if (canSaveToDevice) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(top = 6.dp),
+                    ) {
+                        DownloadDestination.entries.forEach { option ->
+                            FilterChip(
+                                selected = destination == option,
+                                onClick = { onDestinationChange(option) },
+                                enabled = option != DownloadDestination.APP_ONLY || !alreadyInApp,
+                                label = { Text(option.label) },
+                                modifier = Modifier.focusHighlight(RoundedCornerShape(20.dp)),
+                            )
+                        }
+                    }
+                    if (alreadyInApp) {
+                        Text(
+                            "This episode is already in the Anilili offline library. You can still add a device copy.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                } else {
+                    Text(
+                        if (stream.isHls) {
+                            "Anilili offline library · HLS episodes contain playlists and segments, so they cannot be saved as one phone video yet."
+                        } else {
+                            "Anilili offline library · Public device downloads require Android 10 or newer."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = confirmEnabled) {
+                Text("Download")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+private fun selectDownloadStream(
+    current: StreamItem,
+    available: List<StreamItem>,
+    quality: DownloadQuality,
+): StreamItem {
+    if (current.isHls) return current
+    val directCandidates = (listOf(current) + available)
+        .filter(EpisodeDownloads::canSaveToDevice)
+        .filter { candidate ->
+            current.audio == null || candidate.audio == null || candidate.audio == current.audio
+        }
+        .distinctBy(StreamItem::url)
+        .mapNotNull { candidate ->
+            val height = candidate.height ?: declaredVideoHeight(candidate.quality)
+            height?.let { candidate to it }
+        }
+    if (directCandidates.isEmpty()) return current
+    val maxHeight = quality.maxHeight
+    return if (maxHeight == null) {
+        directCandidates.maxByOrNull { it.second }?.first ?: current
+    } else {
+        directCandidates
+            .filter { it.second <= maxHeight }
+            .maxByOrNull { it.second }
+            ?.first
+            ?: directCandidates.minByOrNull { it.second }?.first
+            ?: current
+    }
+}
+
 private fun String.cleanAniListDescription(): String =
     replace(Regex("<[^>]+>"), " ")
         .replace(Regex("\\s+"), " ")
@@ -1110,6 +1359,7 @@ private fun MobileWatchDetails(
     episodeDownload: EpisodeDownload?,
     downloadPreparing: Boolean,
     canDownload: Boolean,
+    canSaveToDevice: Boolean,
     onDownload: () -> Unit,
     focusRequester: FocusRequester,
     onChangeSource: (String, String) -> Unit,
@@ -1147,6 +1397,7 @@ private fun MobileWatchDetails(
                     episodeDownload = episodeDownload,
                     downloadPreparing = downloadPreparing,
                     canDownload = canDownload,
+                    canSaveToDevice = canSaveToDevice,
                     onDownload = onDownload,
                     modifier = Modifier.padding(start = pad, end = pad, top = 16.dp, bottom = 4.dp),
                 )

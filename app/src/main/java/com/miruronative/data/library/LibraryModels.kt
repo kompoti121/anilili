@@ -30,6 +30,10 @@ data class HistoryEntry(
         get() = if (episodeNumber % 1.0 == 0.0) episodeNumber.toInt().toString() else episodeNumber.toString()
 }
 
+/** Canonical watch-history order used by every screen: the latest playback comes first. */
+internal fun sortHistoryLatestFirst(entries: List<HistoryEntry>): List<HistoryEntry> =
+    entries.sortedByDescending(HistoryEntry::updatedAt)
+
 /** A saved series the user wants to watch. */
 @Serializable
 data class WatchlistEntry(

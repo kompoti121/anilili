@@ -12,6 +12,7 @@ import com.miruronative.data.model.HomeCollections
 import com.miruronative.data.model.SourcesResult
 import com.miruronative.data.cache.AppCache
 import com.miruronative.data.remote.searchHanimeCatalogue
+import com.miruronative.data.auth.AccountService
 import com.miruronative.data.auth.AuthManager
 import com.miruronative.data.model.DiscoverOptions
 import com.miruronative.data.model.SkipTimes
@@ -268,6 +269,26 @@ class MiruroRepository(
     suspend fun saveAniListProgress(mediaId: Int, progress: Int, totalEpisodes: Int?) =
         aniList.syncMediaListProgress(mediaId, progress, totalEpisodes)
     suspend fun syncSavedAnime(mediaId: Int, saved: Boolean) = aniList.syncSavedAnime(mediaId, saved)
+
+    /** Move one title on whichever anime-list service is currently signed in. */
+    suspend fun updateAnimeListStatus(anilistId: Int, status: String) {
+        require(status in LIST_STATUSES) { "Unsupported anime list status: $status" }
+        val service = AccountService.active ?: error("Sign in to AniList or MyAnimeList first")
+        when (service) {
+            AccountService.ANILIST -> aniList.updateMediaListStatus(anilistId, status)
+            AccountService.MAL -> {
+                val malId = animeInfo(anilistId)?.idMal?.takeIf { it > 0 }
+                    ?: error("This anime could not be matched to MyAnimeList")
+                mal.updateListStatus(
+                    malId,
+                    status = MalClient.malStatus(status),
+                    isRewatching = status == "REPEATING",
+                )
+            }
+        }
+        DiagnosticsLog.event("${service.label} status moved id=$anilistId status=$status")
+    }
+
     suspend fun syncSavedAnime(mediaIds: Collection<Int>) {
         val viewerId = AuthManager.viewerId() ?: aniList.viewer()?.id ?: return
         aniList.syncSavedAnime(mediaIds, viewerId)
@@ -747,6 +768,8 @@ class MiruroRepository(
     private fun Any?.orEmpty(): String = this?.toString() ?: ""
 
     private companion object {
+        val LIST_STATUSES =
+            setOf("CURRENT", "REPEATING", "PLANNING", "PAUSED", "COMPLETED", "DROPPED")
         const val MAX_SERIES_ENTRIES = 16
         const val MAX_SERIES_DEPTH = 8
         const val SERIES_FETCH_CONCURRENCY = 2

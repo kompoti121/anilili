@@ -1,6 +1,7 @@
 package com.miruronative
 
 import android.Manifest
+import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -9,6 +10,7 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import android.view.View
 import android.view.WindowManager
 import androidx.activity.SystemBarStyle
@@ -121,6 +123,7 @@ import kotlinx.coroutines.launch
 class MainActivity : FragmentActivity() {
     private var inPictureInPicture by mutableStateOf(false)
     private var pendingRoute by mutableStateOf<String?>(null)
+    private var pictureInPictureReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         DiagnosticsLog.event("MainActivity.onCreate start savedState=${savedInstanceState != null}")
@@ -156,6 +159,7 @@ class MainActivity : FragmentActivity() {
                     Box(Modifier.fillMaxSize()) {
                         MiruroRoot(
                             inPictureInPicture = inPictureInPicture,
+                            onPictureInPictureReadyChanged = ::setPictureInPictureReady,
                             pendingRoute = pendingRoute,
                             onRouteConsumed = { pendingRoute = null },
                         )
@@ -275,6 +279,47 @@ class MainActivity : FragmentActivity() {
         DiagnosticsLog.event("PictureInPicture changed active=$isInPictureInPictureMode")
     }
 
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT !in Build.VERSION_CODES.O until Build.VERSION_CODES.S) return
+        if (!pictureInPictureReady || inPictureInPicture) return
+        enterPictureInPicture()
+    }
+
+    private fun setPictureInPictureReady(ready: Boolean) {
+        if (pictureInPictureReady == ready) return
+        pictureInPictureReady = ready
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !supportsPictureInPicture()) return
+        runCatching {
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(16, 9))
+                .apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        setAutoEnterEnabled(ready)
+                        setSeamlessResizeEnabled(true)
+                    }
+                }
+                .build()
+            setPictureInPictureParams(params)
+        }.onFailure { DiagnosticsLog.throwable("PictureInPicture params failed", it) }
+    }
+
+    private fun enterPictureInPicture() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !supportsPictureInPicture()) return
+        runCatching {
+            enterPictureInPictureMode(
+                PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .build(),
+            )
+        }.onSuccess { entered ->
+            DiagnosticsLog.event("PictureInPicture manual enter accepted=$entered")
+        }.onFailure { DiagnosticsLog.throwable("PictureInPicture enter failed", it) }
+    }
+
+    private fun supportsPictureInPicture(): Boolean =
+        packageManager.hasSystemFeature("android.software.picture_in_picture")
+
 }
 
 private fun View.visibilityName(): String = when (visibility) {
@@ -309,6 +354,7 @@ private val PhoneNavigationBarHeight = 64.dp
 @Composable
 private fun MiruroRoot(
     inPictureInPicture: Boolean,
+    onPictureInPictureReadyChanged: (Boolean) -> Unit,
     pendingRoute: String?,
     onRouteConsumed: () -> Unit,
 ) {
@@ -439,6 +485,7 @@ private fun MiruroRoot(
                     AppNavHost(
                         nav = nav,
                         inPictureInPicture = inPictureInPicture,
+                        onPictureInPictureReadyChanged = onPictureInPictureReadyChanged,
                         tvSearchFieldFocusRequester = tvSearchFieldFocusRequester,
                         modifier = Modifier.weight(1f),
                     )
@@ -586,6 +633,7 @@ private fun AppNavigationRail(
 private fun AppNavHost(
     nav: androidx.navigation.NavHostController,
     inPictureInPicture: Boolean,
+    onPictureInPictureReadyChanged: (Boolean) -> Unit,
     tvSearchFieldFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
@@ -747,6 +795,7 @@ private fun AppNavHost(
                     episode = watchEpisode,
                     showEpisodeListInitially = showEpisodes,
                     inPictureInPicture = inPictureInPicture,
+                    onPictureInPictureReadyChanged = onPictureInPictureReadyChanged,
                     onBack = { nav.popBackStack() },
                 )
             }

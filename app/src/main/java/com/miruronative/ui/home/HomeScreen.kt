@@ -2,6 +2,8 @@ package com.miruronative.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -93,6 +95,7 @@ import com.miruronative.ui.UiState
 import com.miruronative.ui.components.ErrorBox
 import com.miruronative.ui.components.LoadingBox
 import com.miruronative.ui.components.AnimeCard
+import com.miruronative.ui.components.ContinueWatchingActionsDialog
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.components.LocalAppChromeBottomInset
@@ -794,6 +797,7 @@ private fun MediaRail(title: String, media: List<Media>, onAnimeClick: (Int) -> 
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ContinueRail(
     history: List<HistoryEntry>,
@@ -801,6 +805,10 @@ private fun ContinueRail(
     firstItemFocusRequester: FocusRequester,
 ) {
     val device = LocalAppDeviceProfile.current
+    var managedEntry by remember { mutableStateOf<HistoryEntry?>(null) }
+    managedEntry?.let { entry ->
+        ContinueWatchingActionsDialog(entry = entry, onDismiss = { managedEntry = null })
+    }
     val cardWidth = when {
         device.isTv -> 240.dp
         device.isExpanded -> 220.dp
@@ -814,6 +822,12 @@ private fun ContinueRail(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = device.pagePadding),
         )
+        Text(
+            "Long-press a title to remove it or move it on your anime list",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = device.pagePadding, vertical = 2.dp),
+        )
         LazyRow(
             modifier = Modifier.focusGroup(),
             contentPadding = PaddingValues(horizontal = device.pagePadding, vertical = 12.dp),
@@ -825,7 +839,12 @@ private fun ContinueRail(
                         .width(cardWidth)
                         .then(if (index == 0) Modifier.focusRequester(firstItemFocusRequester) else Modifier)
                         .focusHighlight()
-                        .clickable { onResume(entry) },
+                        .combinedClickable(
+                            onClickLabel = "Resume ${entry.title}",
+                            onLongClickLabel = "Manage Continue Watching",
+                            onClick = { onResume(entry) },
+                            onLongClick = { managedEntry = entry },
+                        ),
                 ) {
                     Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
                         AsyncImage(model = entry.cover, contentDescription = "Resume ${entry.title}", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)

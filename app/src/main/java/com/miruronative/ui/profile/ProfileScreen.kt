@@ -3,6 +3,8 @@ package com.miruronative.ui.profile
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,9 +76,10 @@ import com.miruronative.data.library.WatchlistEntry
 import com.miruronative.data.model.MediaListEntry
 import com.miruronative.ui.UiState
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
-import com.miruronative.ui.adaptive.TvDeferredTextField
+import com.miruronative.ui.adaptive.TvNativeTextField
 import com.miruronative.ui.adaptive.focusHighlight
 import com.miruronative.ui.components.PullRefreshContainer
+import com.miruronative.ui.components.ContinueWatchingActionsDialog
 import com.miruronative.ui.components.RatingBadge
 import com.miruronative.ui.components.LocalAppChromeBottomInset
 import com.miruronative.ui.components.ScrollAwareTopBar
@@ -313,7 +316,12 @@ fun ProfileScreen(
                 }
             }
 
-            item { ProfileSectionTitle("Continue Watching", "Pick up exactly where you left off") }
+            item {
+                ProfileSectionTitle(
+                    "Continue Watching",
+                    "Long-press a title to remove it or move it on your anime list",
+                )
+            }
             if (history.isEmpty()) {
                 item { EmptyPanel("Nothing watched yet") }
             } else {
@@ -502,11 +510,18 @@ private fun LibraryFilters(
                     modifier = Modifier.weight(1f),
                 )
             }
-            TvDeferredTextField(Modifier.fillMaxWidth()) { fieldModifier ->
+            if (device.isTv) {
+                TvNativeTextField(
+                    value = titleFilter,
+                    onValueChange = onTitleFilterChange,
+                    hint = "Filter by title",
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
                 OutlinedTextField(
                     value = titleFilter,
                     onValueChange = onTitleFilterChange,
-                    modifier = fieldModifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("Filter by title") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     trailingIcon = if (titleFilter.isNotEmpty()) {
@@ -686,10 +701,25 @@ private fun EpisodeDownloadCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HistoryCard(entry: HistoryEntry, onResume: (HistoryEntry) -> Unit) {
     val device = LocalAppDeviceProfile.current
-    Column(Modifier.width(device.posterWidth).focusHighlight().clickable { onResume(entry) }) {
+    var actionsVisible by remember { mutableStateOf(false) }
+    if (actionsVisible) {
+        ContinueWatchingActionsDialog(entry = entry, onDismiss = { actionsVisible = false })
+    }
+    Column(
+        Modifier
+            .width(device.posterWidth)
+            .focusHighlight()
+            .combinedClickable(
+                onClickLabel = "Resume ${entry.title}",
+                onLongClickLabel = "Manage Continue Watching",
+                onClick = { onResume(entry) },
+                onLongClick = { actionsVisible = true },
+            ),
+    ) {
         Box(
             Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(9.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
         ) {

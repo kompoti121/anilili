@@ -642,6 +642,23 @@ class AniListClient(
         update
     }
 
+    /** Move an anime to another standard AniList list while preserving its progress and score. */
+    suspend fun updateMediaListStatus(mediaId: Int, status: String) = withContext(Dispatchers.IO) {
+        require(status in MEDIA_LIST_STATUSES) { "Unsupported AniList status: $status" }
+        val mutation = """
+            mutation (${'$'}mediaId: Int, ${'$'}status: MediaListStatus) {
+              SaveMediaListEntry(mediaId: ${'$'}mediaId, status: ${'$'}status) {
+                id status progress
+              }
+            }
+        """.trimIndent()
+        val variables = buildJsonObject {
+            put("mediaId", mediaId)
+            put("status", status)
+        }
+        post(mutation, variables, authenticated = true)
+    }
+
     /**
      * Mirrors the device Save button without damaging an existing AniList status/progress.
      * New saves become PLANNING; unsaving only removes entries that are still PLANNING.
@@ -782,6 +799,8 @@ class AniListClient(
 
     companion object {
         const val ANILIST_URL = "https://graphql.anilist.co"
+        private val MEDIA_LIST_STATUSES =
+            setOf("CURRENT", "REPEATING", "PLANNING", "PAUSED", "COMPLETED", "DROPPED")
         private const val MAX_STUDIO_MEDIA_PAGES = 20
         private const val STUDIO_MEDIA_PAGE_SIZE = 25
         private const val MAX_RATE_LIMIT_RETRIES = 2

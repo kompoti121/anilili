@@ -119,11 +119,17 @@ class MalClient(
     }
 
     /** Upsert progress/status. [status] uses MAL vocabulary (watching/completed/…); null keeps it. */
-    suspend fun updateListStatus(malId: Int, progress: Int? = null, status: String? = null) =
+    suspend fun updateListStatus(
+        malId: Int,
+        progress: Int? = null,
+        status: String? = null,
+        isRewatching: Boolean? = null,
+    ) =
         withContext(Dispatchers.IO) {
             val body = FormBody.Builder().apply {
                 progress?.let { add("num_watched_episodes", it.toString()) }
                 status?.let { add("status", it) }
+                isRewatching?.let { add("is_rewatching", it.toString()) }
             }.build()
             val request = authed("$API/anime/$malId/my_list_status").patch(body).build()
             execute(request)

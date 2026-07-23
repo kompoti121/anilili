@@ -27,6 +27,7 @@ object LibraryStore {
     private const val KEY_HISTORY = "history"
     private const val KEY_WATCHLIST = "watchlist"
     private const val KEY_REMOTE_STATUSES = "remote_statuses"
+    private const val KEY_DISMISSED_REMOTE_HISTORY = "dismissed_remote_history"
     private const val MAX_HISTORY = 100
     private const val REMOTE_REFRESH_INTERVAL_MS = 30_000L
 
@@ -46,27 +47,43 @@ object LibraryStore {
 
     private val _remoteStatuses = MutableStateFlow<Map<Int, String>>(emptyMap())
     val remoteStatuses = _remoteStatuses.asStateFlow()
+    private var dismissedRemoteHistory = emptySet<Int>()
 
     fun init(context: Context) {
         appContext = context.applicationContext
         prefs = appContext.getSharedPreferences("miruro_library", Context.MODE_PRIVATE)
-        _history.value = decodeList(prefs.getString(KEY_HISTORY, null), HistoryEntry.serializer())
+        val storedHistory = decodeList(prefs.getString(KEY_HISTORY, null), HistoryEntry.serializer())
+        val orderedHistory = sortHistoryLatestFirst(storedHistory).take(MAX_HISTORY)
+        _history.value = orderedHistory
+        if (orderedHistory != storedHistory) {
+            persist(KEY_HISTORY, orderedHistory, HistoryEntry.serializer())
+        }
         _watchlist.value = decodeList(prefs.getString(KEY_WATCHLIST, null), WatchlistEntry.serializer())
         _remoteStatuses.value = decodeList(
             prefs.getString(KEY_REMOTE_STATUSES, null),
             RemoteListStatus.serializer(),
         ).associate { it.anilistId to it.status }
+        dismissedRemoteHistory = prefs.getStringSet(KEY_DISMISSED_REMOTE_HISTORY, emptySet())
+            .orEmpty()
+            .mapNotNull(String::toIntOrNull)
+            .toSet()
     }
 
     // ---- history ----
 
     /** Insert/replace the anime's record (keeps one per anime, most-recent first). */
     fun upsertHistory(entry: HistoryEntry) {
+        if (entry.anilistId in dismissedRemoteHistory) {
+            dismissedRemoteHistory = dismissedRemoteHistory - entry.anilistId
+            persistDismissedRemoteHistory()
+        }
         val stamped = entry.copy(updatedAt = System.currentTimeMillis())
-        val updated = buildList {
-            add(stamped)
-            addAll(_history.value.filter { it.anilistId != entry.anilistId })
-        }.take(MAX_HISTORY)
+        val updated = sortHistoryLatestFirst(
+            buildList {
+                add(stamped)
+                addAll(_history.value.filter { it.anilistId != entry.anilistId })
+            },
+        ).take(MAX_HISTORY)
         _history.value = updated
         persist(KEY_HISTORY, updated, HistoryEntry.serializer())
         // TV launchers surface in-progress titles in their Continue Watching row; publishing is
@@ -82,7 +99,27 @@ object LibraryStore {
 
     fun historyFor(anilistId: Int): HistoryEntry? = _history.value.firstOrNull { it.anilistId == anilistId }
 
+    /**
+     * Remove one Continue Watching row. With [dismissRemoteSeed], account sync cannot immediately
+     * recreate it; actually playing the title again clears that dismissal.
+     */
+    fun removeHistory(anilistId: Int, dismissRemoteSeed: Boolean = true) {
+        val updated = _history.value.filter { it.anilistId != anilistId }
+        if (updated == _history.value) return
+        _history.value = updated
+        persist(KEY_HISTORY, updated, HistoryEntry.serializer())
+        if (dismissRemoteSeed && AccountService.active != null) {
+            dismissedRemoteHistory = dismissedRemoteHistory + anilistId
+            persistDismissedRemoteHistory()
+        }
+        scope.launch { WatchNextManager.remove(appContext, anilistId) }
+    }
+
     fun clearHistory() {
+        if (AccountService.active != null) {
+            dismissedRemoteHistory = dismissedRemoteHistory + _history.value.map(HistoryEntry::anilistId)
+            persistDismissedRemoteHistory()
+        }
         _history.value = emptyList()
         prefs.edit().remove(KEY_HISTORY).apply()
         scope.launch { WatchNextManager.removeAll(appContext) }
@@ -231,6 +268,7 @@ object LibraryStore {
         val seeded = entries.mapNotNull { entry ->
             if (entry.status != "CURRENT" && entry.status != "REPEATING") return@mapNotNull null
             val media = entry.media ?: return@mapNotNull null
+            if (media.id in dismissedRemoteHistory) return@mapNotNull null
             if (media.id in localIds) return@mapNotNull null
             val nextEpisode = entry.progress + 1
             val total = media.episodes
@@ -245,7 +283,7 @@ object LibraryStore {
                 fromRemote = true,
             )
         }
-        val updated = (local + seeded).take(MAX_HISTORY)
+        val updated = sortHistoryLatestFirst(local + seeded).take(MAX_HISTORY)
         if (updated == _history.value) return
         _history.value = updated
         // No WatchNextManager publish for seeded rows: the launcher's Continue Watching channel
@@ -314,9 +352,13 @@ object LibraryStore {
         remoteRefreshJob = null
         lastRemoteRefreshAt = 0L
         _remoteStatuses.value = emptyMap()
-        prefs.edit().remove(KEY_REMOTE_STATUSES).apply()
+        dismissedRemoteHistory = emptySet()
+        prefs.edit()
+            .remove(KEY_REMOTE_STATUSES)
+            .remove(KEY_DISMISSED_REMOTE_HISTORY)
+            .apply()
         // Seeded Continue Watching rows belong to the account that just signed out.
-        val localOnly = _history.value.filterNot { it.fromRemote }
+        val localOnly = sortHistoryLatestFirst(_history.value.filterNot { it.fromRemote })
         if (localOnly != _history.value) {
             _history.value = localOnly
             persist(KEY_HISTORY, localOnly, HistoryEntry.serializer())
@@ -328,6 +370,12 @@ object LibraryStore {
     private fun <T> persist(key: String, list: List<T>, serializer: kotlinx.serialization.KSerializer<T>) {
         val encoded = json.encodeToString(kotlinx.serialization.builtins.ListSerializer(serializer), list)
         prefs.edit().putString(key, encoded).apply()
+    }
+
+    private fun persistDismissedRemoteHistory() {
+        prefs.edit()
+            .putStringSet(KEY_DISMISSED_REMOTE_HISTORY, dismissedRemoteHistory.map(Int::toString).toSet())
+            .apply()
     }
 
     private fun <T> decodeList(raw: String?, serializer: kotlinx.serialization.KSerializer<T>): List<T> {
