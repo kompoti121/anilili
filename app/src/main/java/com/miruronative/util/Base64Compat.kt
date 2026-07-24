@@ -9,4 +9,6 @@ internal object Base64Compat {
         value.decodeBase64()?.toByteArray() ?: throw IllegalArgumentException("Invalid Base64")
 
     fun encode(value: ByteArray): String = value.toByteString().base64()
+
+    fun encodeUrlSafe(value: ByteArray): String = value.toByteString().base64Url().replace("=", "")
 }
