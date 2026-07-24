@@ -14,6 +14,8 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.miruronative.data.AppGraph
 import com.miruronative.diagnostics.DiagnosticsLog
 import java.util.concurrent.ConcurrentHashMap
@@ -57,6 +59,7 @@ object FlixcloudBridge {
             setSupportMultipleWindows(false)
             userAgentString = userAgentString.replace("; wv", "")
         }
+        installEarlyPlaybackGuard(wv)
         wv.addJavascriptInterface(Bridge, "AndroidFlixcloud")
         wv.webChromeClient = object : WebChromeClient() {
             override fun onCreateWindow(
@@ -201,6 +204,41 @@ object FlixcloudBridge {
         return builder.build().toString()
     }
 
+    /**
+     * The resolver needs Flixcloud's decrypt/network code, not its decoded frames. Install this
+     * before the first navigation so page autoplay cannot briefly grab the hardware decoder or
+     * leak intro audio before [onPageFinished] gets a chance to run [captureScript].
+     */
+    private fun installEarlyPlaybackGuard(wv: WebView) {
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.MUTE_AUDIO)) {
+            runCatching {
+                WebViewCompat.setAudioMuted(wv, true)
+            }.onSuccess {
+                DiagnosticsLog.event("$TAG audio muted")
+            }.onFailure {
+                DiagnosticsLog.throwable("$TAG could not mute resolver audio", it)
+            }
+        } else {
+            DiagnosticsLog.event("$TAG audio mute API unavailable")
+        }
+
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            DiagnosticsLog.event("$TAG document-start guard unavailable; using page-finished fallback")
+            return
+        }
+        runCatching {
+            WebViewCompat.addDocumentStartJavaScript(
+                wv,
+                FLIXCLOUD_EARLY_PLAYBACK_GUARD_JS,
+                setOf("*"),
+            )
+        }.onSuccess {
+            DiagnosticsLog.event("$TAG document-start playback guard installed")
+        }.onFailure {
+            DiagnosticsLog.throwable("$TAG could not install document-start playback guard", it)
+        }
+    }
+
     private fun captureScript(id: String): String = """
         (function() {
           if (window.__aniliFlixHooked) return;
@@ -279,3 +317,59 @@ object FlixcloudBridge {
 }
 
 data class FlixcloudResolvedStream(val url: String, val playlistKey: String?)
+
+/**
+ * Runs before Flixcloud's own scripts. Faking a successful `play()` keeps player initialization
+ * moving while preventing the hidden resolver from allocating a decoder. The page-finished
+ * capture script repeats the mute/pause sweep as a fallback for older WebView providers.
+ */
+internal val FLIXCLOUD_EARLY_PLAYBACK_GUARD_JS = """
+    (function() {
+      if (window.__aniliFlixEarlyGuard) return;
+      window.__aniliFlixEarlyGuard = true;
+
+      function quiet(video) {
+        try {
+          video.muted = true;
+          video.defaultMuted = true;
+          video.autoplay = false;
+          if (!video.paused) video.pause();
+        } catch (e) {}
+      }
+
+      try {
+        var media = HTMLMediaElement.prototype;
+        if (!media.__aniliFlixPlayGuarded) {
+          media.__aniliFlixPlayGuarded = true;
+          media.play = function() {
+            quiet(this);
+            return Promise.resolve();
+          };
+        }
+      } catch (e) {}
+
+      function quietAll() {
+        try {
+          var videos = document.querySelectorAll('video, audio');
+          for (var i = 0; i < videos.length; i++) quiet(videos[i]);
+        } catch (e) {}
+      }
+
+      function watchForMedia() {
+        quietAll();
+        try {
+          var root = document.documentElement;
+          if (root) {
+            new MutationObserver(quietAll).observe(root, { childList: true, subtree: true });
+          }
+        } catch (e) {}
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', watchForMedia, { once: true });
+      } else {
+        watchForMedia();
+      }
+      setInterval(quietAll, 100);
+    })();
+""".trimIndent()

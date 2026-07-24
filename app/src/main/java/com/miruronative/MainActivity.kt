@@ -21,24 +21,39 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -60,10 +75,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -71,7 +89,10 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.NavType
@@ -119,6 +140,8 @@ import com.miruronative.playback.PlaybackService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 class MainActivity : FragmentActivity() {
     private var inPictureInPicture by mutableStateOf(false)
@@ -370,6 +393,7 @@ private fun MiruroRoot(
     var restoreChromeJob by remember { mutableStateOf<Job?>(null) }
     val tvSearchRailFocusRequester = remember { FocusRequester() }
     val tvSearchFieldFocusRequester = remember { FocusRequester() }
+    val tvHomePrimaryFocusRequester = remember { FocusRequester() }
     // Direction-based like YouTube/Chrome: hide once a downward scroll passes a small threshold,
     // show the moment the user scrolls up (or goes idle). The threshold stops micro-scrolls from
     // flickering the chrome, and hide/show firing once per direction change (instead of on every
@@ -465,30 +489,61 @@ private fun MiruroRoot(
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
             ) { innerPadding ->
-                Row(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(
-                            bottom = if (hasPhoneBottomBar) 0.dp else innerPadding.calculateBottomPadding(),
-                        ),
-                ) {
-                    if (showBottomBar && deviceProfile.useNavigationRail) {
-                        AppNavigationRail(
+                val showTvTopNavigation = deviceProfile.isTv &&
+                    (showBottomBar || currentRoute == Routes.DETAIL)
+                Box(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(
+                                bottom = if (hasPhoneBottomBar) 0.dp else innerPadding.calculateBottomPadding(),
+                            ),
+                    ) {
+                        if (showBottomBar && deviceProfile.useNavigationRail && !deviceProfile.isTv) {
+                            AppNavigationRail(
+                                currentRoute = currentRoute,
+                                menuLanguage = menuLanguage,
+                                onNavigate = nav::navigateTab,
+                                searchRailFocusRequester = tvSearchRailFocusRequester,
+                                searchFieldFocusRequester = tvSearchFieldFocusRequester,
+                                modifier = Modifier.fillMaxHeight(),
+                            )
+                        }
+                        AppNavHost(
+                            nav = nav,
+                            inPictureInPicture = inPictureInPicture,
+                            onPictureInPictureReadyChanged = onPictureInPictureReadyChanged,
+                            tvSearchFieldFocusRequester = tvSearchFieldFocusRequester,
+                            tvHomePrimaryFocusRequester = tvHomePrimaryFocusRequester,
+                            modifier = Modifier
+                                .weight(1f)
+                                .then(
+                                    if (
+                                        showTvTopNavigation &&
+                                        currentRoute != Routes.HOME &&
+                                        currentRoute != Routes.DETAIL
+                                    ) {
+                                        Modifier.padding(top = 82.dp)
+                                    } else {
+                                        Modifier
+                                    },
+                                ),
+                        )
+                    }
+                    if (showTvTopNavigation) {
+                        AppTvTopNavigation(
                             currentRoute = currentRoute,
                             menuLanguage = menuLanguage,
                             onNavigate = nav::navigateTab,
-                            searchRailFocusRequester = tvSearchRailFocusRequester,
+                            onNotificationsClick = {
+                                nav.navigate(Routes.NOTIFICATIONS) { launchSingleTop = true }
+                            },
+                            searchNavFocusRequester = tvSearchRailFocusRequester,
                             searchFieldFocusRequester = tvSearchFieldFocusRequester,
-                            modifier = Modifier.fillMaxHeight(),
+                            homeContentFocusRequester = tvHomePrimaryFocusRequester,
+                            modifier = Modifier.align(Alignment.TopCenter),
                         )
                     }
-                    AppNavHost(
-                        nav = nav,
-                        inPictureInPicture = inPictureInPicture,
-                        onPictureInPictureReadyChanged = onPictureInPictureReadyChanged,
-                        tvSearchFieldFocusRequester = tvSearchFieldFocusRequester,
-                        modifier = Modifier.weight(1f),
-                    )
                 }
             }
             if (hasPhoneBottomBar) {
@@ -522,7 +577,10 @@ private fun MiruroRoot(
             }
             // Hidden resolver WebViews are not needed for Home. On slow Android TV boxes,
             // creating WebView during first composition can delay the first visible frame.
-            if (resolverWebViewsReady) {
+            // Account OAuth uses another full-screen WebView. Release the resident resolver
+            // WebViews while Library/Profile is open so memory-starved TVs do not make AniList's
+            // login renderer stall before its JavaScript app mounts.
+            if (resolverWebViewsReady && currentRoute != Routes.MORE) {
                 PipeWebView()
                 FlixcloudResolverWebView()
                 // Only carried once adult content is on. A viewer who never enables it does not
@@ -539,6 +597,200 @@ private fun MiruroRoot(
                 }
             }
         }
+    }
+}
+
+private val tvPrimaryTabs = Tab.entries.filterNot { it == Tab.SETTINGS }
+private val TvClockFormatter = DateTimeFormatter.ofPattern("HH:mm")
+
+@Composable
+private fun AppTvTopNavigation(
+    currentRoute: String?,
+    menuLanguage: MenuLanguage,
+    onNavigate: (String) -> Unit,
+    onNotificationsClick: () -> Unit,
+    searchNavFocusRequester: FocusRequester,
+    searchFieldFocusRequester: FocusRequester,
+    homeContentFocusRequester: FocusRequester,
+    modifier: Modifier = Modifier,
+) {
+    val focusRequesters = remember(searchNavFocusRequester) {
+        Tab.entries.associateWith { tab ->
+            if (tab == Tab.SEARCH) searchNavFocusRequester else FocusRequester()
+        }
+    }
+    val unread by com.miruronative.data.reminder.NotificationCenter.unread.collectAsState()
+    var clockText by remember { mutableStateOf(LocalTime.now().format(TvClockFormatter)) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            clockText = LocalTime.now().format(TvClockFormatter)
+            delay(30_000)
+        }
+    }
+    LaunchedEffect(currentRoute) {
+        Tab.entries.firstOrNull { it.route == currentRoute }
+            ?.let { tab -> runCatching { focusRequesters.getValue(tab).requestFocus() } }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(82.dp)
+            .background(
+                androidx.compose.ui.graphics.Brush.verticalGradient(
+                    0f to ComposeColor.Black.copy(.74f),
+                    1f to ComposeColor.Transparent,
+                ),
+            )
+            .padding(horizontal = 34.dp, vertical = 14.dp),
+    ) {
+        Row(
+            modifier = Modifier.align(Alignment.CenterStart),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Image(
+                painter = painterResource(R.drawable.anilili_launcher),
+                contentDescription = null,
+                modifier = Modifier.size(42.dp).clip(CircleShape),
+            )
+            Text(
+                text = stringResource(R.string.app_name).uppercase(),
+                color = ComposeColor.White,
+                fontWeight = FontWeight.Black,
+                fontSize = 16.sp,
+                letterSpacing = 1.5.sp,
+                modifier = Modifier.padding(start = 10.dp),
+            )
+        }
+
+        Row(
+            modifier = Modifier.align(Alignment.Center),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tvPrimaryTabs.forEach { tab ->
+                TvTopNavigationItem(
+                    tab = tab,
+                    label = tab.label(menuLanguage),
+                    selected = currentRoute == tab.route ||
+                        (currentRoute == Routes.DETAIL && tab == Tab.HOME),
+                    onClick = { onNavigate(tab.route) },
+                    focusRequester = focusRequesters.getValue(tab),
+                    searchFieldFocusRequester = searchFieldFocusRequester,
+                    homeContentFocusRequester = homeContentFocusRequester,
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BadgedBox(
+                badge = {
+                    if (unread > 0) {
+                        Badge { Text(if (unread > 99) "99+" else unread.toString()) }
+                    }
+                },
+            ) {
+                IconButton(
+                    onClick = onNotificationsClick,
+                    modifier = Modifier.focusHighlight(CircleShape, focusedScale = 1.08f),
+                ) {
+                    Icon(
+                        Icons.Default.Notifications,
+                        contentDescription = if (unread > 0) "Notifications, $unread unread" else "Notifications",
+                        tint = ComposeColor.White.copy(.78f),
+                    )
+                }
+            }
+            IconButton(
+                onClick = { onNavigate(Tab.SETTINGS.route) },
+                modifier = Modifier
+                    .focusRequester(focusRequesters.getValue(Tab.SETTINGS))
+                    .background(
+                        if (currentRoute == Tab.SETTINGS.route) {
+                            MaterialTheme.colorScheme.primary.copy(.24f)
+                        } else {
+                            ComposeColor.Transparent
+                        },
+                        CircleShape,
+                    )
+                    .focusHighlight(CircleShape, focusedScale = 1.08f),
+            ) {
+                Icon(
+                    Icons.Default.Settings,
+                    contentDescription = Tab.SETTINGS.label(menuLanguage),
+                    tint = if (currentRoute == Tab.SETTINGS.route) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        ComposeColor.White.copy(.78f)
+                    },
+                )
+            }
+            Spacer(Modifier.width(3.dp))
+            Text(
+                clockText,
+                color = ComposeColor.White.copy(.72f),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TvTopNavigationItem(
+    tab: Tab,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester,
+    searchFieldFocusRequester: FocusRequester,
+    homeContentFocusRequester: FocusRequester,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(12.dp)
+    val container = when {
+        focused -> ComposeColor.White
+        selected -> MaterialTheme.colorScheme.primary.copy(.24f)
+        else -> ComposeColor.Transparent
+    }
+    val content = when {
+        focused -> ComposeColor.Black
+        selected -> ComposeColor.White
+        else -> ComposeColor.White.copy(.68f)
+    }
+
+    Row(
+        modifier = Modifier
+            .focusRequester(focusRequester)
+            .focusProperties {
+                if (selected) {
+                    when (tab) {
+                        Tab.HOME -> down = homeContentFocusRequester
+                        Tab.SEARCH -> down = searchFieldFocusRequester
+                        else -> Unit
+                    }
+                }
+            }
+            .onFocusChanged { focused = it.isFocused }
+            .clip(shape)
+            .background(container)
+            .border(
+                width = if (focused) 0.dp else if (selected) 1.dp else 0.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary.copy(.5f) else ComposeColor.Transparent,
+                shape = shape,
+            )
+            .clickable(onClickLabel = label, onClick = onClick)
+            .padding(horizontal = 15.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Icon(tab.icon, contentDescription = null, tint = content, modifier = Modifier.size(17.dp))
+        Text(label, color = content, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -635,6 +887,7 @@ private fun AppNavHost(
     inPictureInPicture: Boolean,
     onPictureInPictureReadyChanged: (Boolean) -> Unit,
     tvSearchFieldFocusRequester: FocusRequester,
+    tvHomePrimaryFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     NavHost(
@@ -654,6 +907,7 @@ private fun AppNavHost(
                     onResume = { e -> nav.navigate(Routes.watch(e.anilistId, e.provider, e.category, e.episodeLabel)) },
                     onSearchClick = { nav.navigateTab(Routes.SEARCH) },
                     onNotificationsClick = { nav.navigate(Routes.NOTIFICATIONS) { launchSingleTop = true } },
+                    tvPrimaryFocusRequester = tvHomePrimaryFocusRequester,
                 )
             }
             composable(Routes.NOTIFICATIONS) {

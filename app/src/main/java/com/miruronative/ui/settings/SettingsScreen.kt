@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Storage
@@ -75,6 +76,7 @@ import com.miruronative.diagnostics.DiagnosticsLog
 import com.miruronative.ui.UiState
 import com.miruronative.ui.adaptive.LocalAppDeviceProfile
 import com.miruronative.ui.adaptive.focusHighlight
+import com.miruronative.ui.adaptive.rememberScreenReaderActive
 import com.miruronative.ui.components.CaptionAppearanceDialog
 import com.miruronative.ui.components.LocalAppChromeBottomInset
 import com.miruronative.ui.components.ScrollAwareTopBar
@@ -92,6 +94,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val device = LocalAppDeviceProfile.current
+    val screenReaderActive = rememberScreenReaderActive()
     val token by AuthManager.token.collectAsState()
     val malLoggedIn by MalAuthManager.loggedIn.collectAsState()
     val profileState by vm.profile.collectAsState()
@@ -301,6 +304,27 @@ fun SettingsScreen(
                 )
             }
             item { SectionDivider() }
+
+            if (device.isTv) {
+                item { SettingsSectionTitle("Accessibility") }
+                item {
+                    SettingsAction(
+                        title = "Spoken feedback: ${if (screenReaderActive) "On" else "Off"}",
+                        icon = { Icon(Icons.Default.RecordVoiceOver, contentDescription = null) },
+                        enabled = true,
+                        onClick = { openAccessibilitySettings(context) },
+                    )
+                }
+                item {
+                    Text(
+                        "Off by default. Opens Android TV Accessibility settings for viewers who want narration.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                }
+                item { SectionDivider() }
+            }
 
             item { SettingsSectionTitle("Downloads") }
             item {
@@ -538,6 +562,16 @@ fun SettingsScreen(
 }
 
 private const val ANILILI_WEBSITE = "https://kompoti121.github.io/Anilili/"
+
+private fun openAccessibilitySettings(context: Context) {
+    runCatching {
+        context.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+    }.onFailure {
+        runCatching {
+            context.startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
+        }
+    }
+}
 
 private fun shareAnilili(context: Context, openWebsite: Boolean) {
     val website = Uri.parse(ANILILI_WEBSITE)

@@ -753,16 +753,15 @@ class WatchViewModel : ViewModel() {
     private fun launchSourceValidation(number: Double) {
         sourceValidationJob?.cancel()
         sourceValidationJob = viewModelScope.launch {
-            // TV sticks have ~1GB RAM and validation is heavy (scraper networking plus Flixcloud
-            // WebView loads) — running it eagerly at 4-way concurrency alongside 1080p playback
-            // contributed to low-memory kills mid-episode. Give playback a head start and go
-            // one server at a time there.
+            // TV sticks have ~1GB RAM and validation is heavy. Give playback a head start and go
+            // one server at a time there. Providers that would launch a hidden player are omitted
+            // on every device below; selecting one explicitly still resolves it normally.
             val validationConcurrency = if (AppGraph.isTv) 1 else SOURCE_VALIDATION_CONCURRENCY
             if (AppGraph.isTv) kotlinx.coroutines.delay(10_000)
             val candidates = availableSourceOptions(mergedEpisodes, number).filter { option ->
                 val key = EpisodeSourceKey(number, option.provider, option.category)
                 if (key in confirmedSources || key in unavailableSources) return@filter false
-                validatesDuringPlayback(option.provider, AppGraph.isTv)
+                validatesDuringPlayback(option.provider)
             }
             if (candidates.isEmpty()) {
                 val data = (_state.value as? UiState.Success)?.data
@@ -951,12 +950,13 @@ internal fun preferredProviderForWatch(storedPreferred: String?, routeProvider: 
 
 /**
  * Whether the background sweep may confirm this provider while an episode is on screen.
- * Providers that resolve through the hidden WebView run a real player to do it, and a TV stick has
- * one hardware video decoder — the resolver takes it and the system preempts playback. On TV those
- * stay unvalidated; selecting one by hand still resolves, because then nothing else holds it.
+ * Providers that resolve through the hidden WebView run a real player to do it. Even larger
+ * devices can have a single hardware decoder, and a background resolver may preempt playback or
+ * leak its intro audio. Those providers stay unvalidated on every device; selecting one by hand
+ * still resolves it normally.
  */
-internal fun validatesDuringPlayback(provider: String, isTv: Boolean): Boolean =
-    !(isTv && provider in ProviderCatalog.webViewResolverProviders)
+internal fun validatesDuringPlayback(provider: String): Boolean =
+    provider !in ProviderCatalog.webViewResolverProviders
 
 private fun bestHls(streams: List<StreamItem>): StreamItem? = streams
     .filter(StreamItem::isHls)

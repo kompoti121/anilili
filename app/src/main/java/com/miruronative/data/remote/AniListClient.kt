@@ -118,6 +118,13 @@ class AniListClient(
         startDate { year month day }
     """.trimIndent()
 
+    // Home's cinematic hero needs a synopsis, while poster rails and relation nodes stay on the
+    // compact field set to keep their payloads small.
+    private val mediaSpotlightFields = """
+        $mediaListFields
+        description(asHtml: false)
+    """.trimIndent()
+
     private val mediaFullFields = """
         id
         idMal
@@ -167,7 +174,7 @@ class AniListClient(
         val gql = """
             query (${'$'}isAdult: Boolean, ${'$'}airedBefore: Int) {
               spotlight: Page(page: 1, perPage: 30) {
-                media(type: ANIME, sort: [TRENDING_DESC], isAdult: ${'$'}isAdult) { $mediaListFields }
+                media(type: ANIME, sort: [TRENDING_DESC], isAdult: ${'$'}isAdult) { $mediaSpotlightFields }
               }
               newest: Page(page: 1, perPage: 50) {
                 airingSchedules(airingAt_lesser: ${'$'}airedBefore, sort: TIME_DESC) {

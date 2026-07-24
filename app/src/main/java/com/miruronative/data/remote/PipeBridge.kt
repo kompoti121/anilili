@@ -44,11 +44,12 @@ object PipeBridge {
 
     /**
      * The hidden tab hosts the full miruro SPA, whose scripts/animations otherwise run for the
-     * whole session — on a Fire TV stick its software-layer draws even stalled the main thread
-     * for seconds. Idle (View.onPause) the WebView when no pipe request has needed it for a
-     * while; each fetch resumes it first. The CF session/cookies survive onPause just fine.
+     * whole session — on a Fire TV stick its compositor can exhaust Chromium's tile budget and
+     * leave the visible episode black while audio continues. Idle (View.onPause) the WebView
+     * shortly after the last pipe request completes; each fetch resumes it first. The CF
+     * session/cookies survive onPause just fine.
      */
-    private const val IDLE_AFTER_MS = 60_000L
+    private const val IDLE_AFTER_MS = 2_000L
     private val idleRunnable = Runnable {
         webView?.onPause()
         DiagnosticsLog.event("PipeBridge webview idled")
@@ -57,6 +58,12 @@ object PipeBridge {
     private fun scheduleIdle() {
         main.removeCallbacks(idleRunnable)
         main.postDelayed(idleRunnable, IDLE_AFTER_MS)
+    }
+
+    private fun scheduleIdleIfUnused() {
+        main.post {
+            if (pending.isEmpty()) scheduleIdle()
+        }
     }
 
     @Volatile private var webView: WebView? = null
@@ -214,7 +221,6 @@ object PipeBridge {
                 main.removeCallbacks(idleRunnable)
                 wv.onResume()
                 wv.evaluateJavascript(js, null)
-                scheduleIdle()
             }
         }
 
@@ -224,6 +230,7 @@ object PipeBridge {
                 DiagnosticsLog.event("PipeBridge fetch timeout e.len=${e.length}")
                 """{"ok":false,"status":-1,"error":"timeout"}"""
             }
+        scheduleIdleIfUnused()
         Log.d(TAG, "fetch(e.len=${e.length}) -> ${result.take(180)}")
         return result
     }

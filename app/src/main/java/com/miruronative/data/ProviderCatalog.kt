@@ -44,7 +44,7 @@ object ProviderCatalog {
 
     // Providers whose resolution drives the hidden resolver WebView rather than plain HTTP. That
     // page runs a real player, so resolving one competes for the hardware video decoder with
-    // whatever is already on screen — background validation skips these on TV.
+    // whatever is already on screen — background validation skips these during playback.
     val webViewResolverProviders = setOf("reanime")
 
     // The consistently quick Anivexa lookups (API-backed, not full-page scrapers). Raced as an

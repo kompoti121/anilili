@@ -116,10 +116,10 @@ class WatchSourcePolicyTest {
     }
 
     @Test
-    fun `tv leaves webview-resolved providers out of the background sweep`() {
-        assertEquals(false, validatesDuringPlayback("reanime", isTv = true))
-        assertTrue(validatesDuringPlayback("reanime", isTv = false))
-        assertTrue(validatesDuringPlayback("bonk", isTv = true))
+    fun `background sweep never starts a hidden player during playback`() {
+        assertEquals(false, validatesDuringPlayback("reanime"))
+        assertTrue(validatesDuringPlayback("bonk"))
+        assertTrue(validatesDuringPlayback("anibd"))
     }
 
     @Test

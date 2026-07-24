@@ -179,6 +179,14 @@ fun EmbedWebView(
     // Compatibility state for old WebViews where a cross-origin frame cannot report playback.
     var fallbackIsPlaying by remember(url) { mutableStateOf(true) }
     val tvPlayPauseFocus = remember { FocusRequester() }
+    var tvControlsFocusRestoreRequest by remember(url) { mutableIntStateOf(0) }
+    val restoreTvControlsFocus = {
+        if (device.isTv && focusPlayerOnStart) {
+            tvControlsVisible = true
+            tvControlsInteraction++
+            tvControlsFocusRestoreRequest++
+        }
+    }
     val currentActiveUrl by rememberUpdatedState(activeUrl)
     val currentPositionMs by rememberUpdatedState(positionMs)
     val currentOnPlaybackError by rememberUpdatedState(onPlaybackError)
@@ -287,6 +295,14 @@ fun EmbedWebView(
         if (!tvControlsVisible || !focusPlayerOnStart) return@LaunchedEffect
         delay(32)
         runCatching { tvPlayPauseFocus.requestFocus() }
+    }
+    LaunchedEffect(tvControlsFocusRestoreRequest, focusPlayerOnStart) {
+        if (tvControlsFocusRestoreRequest == 0 || !focusPlayerOnStart) return@LaunchedEffect
+        delay(64)
+        runCatching { tvPlayPauseFocus.requestFocus() }
+        DiagnosticsLog.event(
+            "EmbedWebView TV controls focus restored request=$tvControlsFocusRestoreRequest",
+        )
     }
     val screenReaderActive = rememberScreenReaderActive()
     // TalkBack users can't discover the hidden control row through a key press, so present it
@@ -575,7 +591,10 @@ fun EmbedWebView(
     Box(modifier.then(remoteModifier)) {
         if (captionAppearanceVisible) {
             CaptionAppearanceDialog(
-                onDismiss = { captionAppearanceVisible = false },
+                onDismiss = {
+                    captionAppearanceVisible = false
+                    restoreTvControlsFocus()
+                },
                 footnote = "This server renders its own subtitles, so it may ignore some of these.",
             )
         }
@@ -874,7 +893,10 @@ fun EmbedWebView(
 
         if (settingsSheetVisible) {
             PlayerSettingsSheet(
-                onDismiss = { settingsSheetVisible = false },
+                onDismiss = {
+                    settingsSheetVisible = false
+                    restoreTvControlsFocus()
+                },
                 autoplay = autoplay,
                 onAutoplayChange = SettingsStore::setAutoplay,
                 speed = if (webPlaybackAvailable) playbackSpeed else null,
@@ -891,7 +913,10 @@ fun EmbedWebView(
                     )
                 },
                 onCaptionAppearance = if (webPlaybackAvailable) {
-                    { captionAppearanceVisible = true }
+                    {
+                        if (device.isTv) settingsSheetVisible = false
+                        captionAppearanceVisible = true
+                    }
                 } else {
                     null
                 },

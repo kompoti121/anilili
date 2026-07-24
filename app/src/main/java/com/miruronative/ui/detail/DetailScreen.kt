@@ -141,6 +141,53 @@ fun DetailScreen(
         }
     }
 
+    if (device.isTv) {
+        when (val s = state) {
+            is UiState.Loading -> LoadingBox(Modifier.padding(top = 82.dp))
+            is UiState.Error -> ErrorBox(
+                message = s.message,
+                onRetry = { vm.load(animeId, force = true) },
+                modifier = Modifier.padding(top = 82.dp),
+            )
+            is UiState.Success -> {
+                val info = s.data.info
+                val saved = watchlist.any { it.anilistId == info.id }
+                val listStatusLabel = mediaListStatusLabel(remoteStatuses[info.id])
+                PullRefreshContainer(
+                    isRefreshing = isRefreshing,
+                    onRefresh = { vm.refresh(animeId) },
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    TvDetailContent(
+                        data = s.data,
+                        saved = saved,
+                        listStatusLabel = listStatusLabel,
+                        resume = history.firstOrNull { it.anilistId == animeId },
+                        history = history,
+                        onToggleSaved = {
+                            LibraryStore.toggleWatchlist(
+                                WatchlistEntry(
+                                    anilistId = info.id,
+                                    title = info.title.preferred,
+                                    cover = info.coverImage.best,
+                                    format = info.format,
+                                    averageScore = info.averageScore,
+                                ),
+                            )
+                        },
+                        onPlay = onPlay,
+                        onAnimeClick = onAnimeClick,
+                        onStudioClick = onStudioClick,
+                        onSelectSeason = vm::selectSeason,
+                        primaryActionFocusRequester = primaryActionFocusRequester,
+                        onPrimaryFocusAcquired = { backFocusEnabled = true },
+                    )
+                }
+            }
+        }
+        return
+    }
+
     Scaffold(
         topBar = {
             ScrollAwareTopBar {

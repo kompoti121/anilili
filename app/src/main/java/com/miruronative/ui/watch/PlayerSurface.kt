@@ -505,10 +505,26 @@ fun PlayerSurface(
     var lastAudibleVolume by remember { mutableStateOf(1f) }
     val tvPlayPauseFocus = remember { FocusRequester() }
     val tvPlayerFocus = remember { FocusRequester() }
+    var tvControlsFocusRestoreRequest by remember(activeStream.url) { mutableIntStateOf(0) }
+    val restoreTvControlsFocus = {
+        if (device.isTv && focusPlayerOnStart) {
+            tvControlsVisible = true
+            tvControlsInteraction++
+            tvControlsFocusRestoreRequest++
+        }
+    }
     LaunchedEffect(tvControlsVisible, focusPlayerOnStart) {
         if (!tvControlsVisible || !focusPlayerOnStart) return@LaunchedEffect
         delay(32)
         runCatching { tvPlayPauseFocus.requestFocus() }
+    }
+    LaunchedEffect(tvControlsFocusRestoreRequest, focusPlayerOnStart) {
+        if (tvControlsFocusRestoreRequest == 0 || !focusPlayerOnStart) return@LaunchedEffect
+        delay(64)
+        runCatching { tvPlayPauseFocus.requestFocus() }
+        DiagnosticsLog.event(
+            "PlayerSurface TV controls focus restored request=$tvControlsFocusRestoreRequest",
+        )
     }
     val screenReaderActive = rememberScreenReaderActive()
     var settingsExpanded by remember { mutableStateOf(false) }
@@ -968,7 +984,10 @@ fun PlayerSurface(
                 emptyList()
             }
             PlayerSettingsSheet(
-                onDismiss = { settingsExpanded = false },
+                onDismiss = {
+                    settingsExpanded = false
+                    restoreTvControlsFocus()
+                },
                 autoplay = autoplay,
                 onAutoplayChange = SettingsStore::setAutoplay,
                 speed = activeController.playbackParameters.speed,
@@ -997,7 +1016,12 @@ fun PlayerSurface(
         }
 
         if (captionAppearanceVisible) {
-            CaptionAppearanceDialog(onDismiss = { captionAppearanceVisible = false })
+            CaptionAppearanceDialog(
+                onDismiss = {
+                    captionAppearanceVisible = false
+                    restoreTvControlsFocus()
+                },
+            )
         }
 
         if (controller == null) {

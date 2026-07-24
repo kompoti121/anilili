@@ -113,6 +113,7 @@ fun HomeScreen(
     onResume: (HistoryEntry) -> Unit,
     onSearchClick: () -> Unit,
     onNotificationsClick: () -> Unit,
+    tvPrimaryFocusRequester: FocusRequester? = null,
     modifier: Modifier = Modifier,
     vm: HomeViewModel = viewModel(),
 ) {
@@ -132,6 +133,46 @@ fun HomeScreen(
             slowStartup = true
             DiagnosticsLog.event("Home still loading after 10 seconds")
         }
+    }
+
+    if (device.isTv) {
+        when (val s = state) {
+            is UiState.Loading -> {
+                if (slowStartup) {
+                    StartupStillLoading(
+                        message = diagnosticsMessage,
+                        onRetry = { vm.load(force = true) },
+                        onShareDiagnostics = {
+                            DiagnosticsLog.share(context)
+                                .onFailure { diagnosticsMessage = it.message ?: "Couldn't share diagnostics" }
+                        },
+                        modifier = modifier.padding(top = 82.dp),
+                    )
+                } else {
+                    LoadingBox(modifier.padding(top = 82.dp))
+                }
+            }
+            is UiState.Error -> ErrorBox(
+                s.message,
+                vm::load,
+                modifier.padding(top = 82.dp),
+            )
+            is UiState.Success -> PullRefreshContainer(
+                isRefreshing = isRefreshing,
+                onRefresh = vm::refresh,
+                modifier = modifier.fillMaxSize(),
+            ) {
+                TvHomeContent(
+                    data = s.data,
+                    history = history,
+                    onAnimeClick = onAnimeClick,
+                    onWatchNow = onWatchNow,
+                    onResume = onResume,
+                    primaryActionFocusRequester = tvPrimaryFocusRequester,
+                )
+            }
+        }
+        return
     }
 
     Scaffold(

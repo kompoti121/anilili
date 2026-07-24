@@ -161,7 +161,7 @@ class MiruroRepository(
     suspend fun homeCollections(force: Boolean = false): HomeCollections {
         val adultHidden = hideAdult
         val collections = cache.getOrFetch(
-            key = "home:v2:${if (adultHidden) "sfw" else "all"}",
+            key = "home:v3:${if (adultHidden) "sfw" else "all"}",
             serializer = HomeCollections.serializer(),
             ttlMs = HOME_TTL,
             forceRefresh = force,
